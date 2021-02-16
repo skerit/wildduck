@@ -10,7 +10,7 @@ const fs = require('fs');
 const MessageHandler = require('./lib/message-handler');
 const MailboxHandler = require('./lib/mailbox-handler');
 const AuditHandler = require('./lib/audit-handler');
-const setupIndexes = yaml.safeLoad(fs.readFileSync(__dirname + '/indexes.yaml', 'utf8'));
+const setupIndexes = yaml.load(fs.readFileSync(__dirname + '/indexes.yaml', 'utf8'));
 const Gelf = require('gelf');
 const os = require('os');
 
@@ -18,6 +18,7 @@ const taskRestore = require('./lib/tasks/restore');
 const taskUserDelete = require('./lib/tasks/user-delete');
 const taskQuota = require('./lib/tasks/quota');
 const taskAudit = require('./lib/tasks/audit');
+const taskClearFolder = require('./lib/tasks/clear-folder');
 
 let messageHandler;
 let mailboxHandler;
@@ -303,6 +304,7 @@ function clearExpiredMessages() {
                 })
                 .project({
                     _id: true,
+                    user: true,
                     mailbox: true,
                     uid: true,
                     size: true,
@@ -351,7 +353,7 @@ function clearExpiredMessages() {
                             //failed to delete
                             log.error(
                                 'GC',
-                                'Failed to delete archived message user=%s mailbox=% uid=%s id=%s. %s',
+                                'Failed to delete archived message user=%s mailbox=%s uid=%ss id=%s. %s',
                                 messageData.user,
                                 messageData.mailbox,
                                 messageData.uid,
@@ -363,7 +365,7 @@ function clearExpiredMessages() {
 
                         log.verbose(
                             'GC',
-                            'Deleted archived message user=%s mailbox=% uid=%s id=%s',
+                            'Deleted archived message user=%s mailbox=%s uid=%s id=%s',
                             messageData.user,
                             messageData.mailbox,
                             messageData.uid,
@@ -592,6 +594,22 @@ function processTask(taskData, callback) {
                 {
                     messageHandler,
                     auditHandler,
+                    loggelf
+                },
+                err => {
+                    if (err) {
+                        return callback(err);
+                    }
+                    // release
+                    callback(null, true);
+                }
+            );
+
+        case 'clear-folder':
+            return taskClearFolder(
+                taskData,
+                {
+                    messageHandler,
                     loggelf
                 },
                 err => {

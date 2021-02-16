@@ -26,6 +26,7 @@ const mailboxesRoutes = require('./lib/api/mailboxes');
 const messagesRoutes = require('./lib/api/messages');
 const storageRoutes = require('./lib/api/storage');
 const filtersRoutes = require('./lib/api/filters');
+const domainaccessRoutes = require('./lib/api/domainaccess');
 const aspsRoutes = require('./lib/api/asps');
 const totpRoutes = require('./lib/api/2fa/totp');
 const custom2faRoutes = require('./lib/api/2fa/custom');
@@ -37,6 +38,7 @@ const submitRoutes = require('./lib/api/submit');
 const auditRoutes = require('./lib/api/audit');
 const domainaliasRoutes = require('./lib/api/domainaliases');
 const dkimRoutes = require('./lib/api/dkim');
+const webhooksRoutes = require('./lib/api/webhooks');
 
 let userHandler;
 let mailboxHandler;
@@ -66,8 +68,8 @@ const serverOptions = {
 
                 _remote_ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
 
-                _ip: ((req.body && req.body.ip) || (req.query && req.query.ip) || '').toString().substr(0, 40) || '',
-                _sess: ((req.body && req.body.sess) || (req.query && req.query.sess) || '').toString().substr(0, 40) || '',
+                _ip: ((req.params && req.params.ip) || '').toString().substr(0, 40) || '',
+                _sess: ((req.params && req.params.sess) || '').toString().substr(0, 40) || '',
 
                 _http_route: path,
                 _http_method: req.method,
@@ -151,7 +153,12 @@ server.use((req, res, next) => {
 
 server.use(restify.plugins.gzipResponse());
 
-server.use(restify.plugins.queryParser({ allowDots: true }));
+server.use(
+    restify.plugins.queryParser({
+        allowDots: true,
+        mapParams: true
+    })
+);
 server.use(
     restify.plugins.bodyParser({
         maxBodySize: 0,
@@ -168,6 +175,11 @@ server.use(
         if (req.query.accessToken) {
             // delete or it will conflict with Joi schemes
             delete req.query.accessToken;
+        }
+
+        if (req.params.accessToken) {
+            // delete or it will conflict with Joi schemes
+            delete req.params.accessToken;
         }
 
         if (req.headers['x-access-token']) {
@@ -347,8 +359,8 @@ server.use(
     })
 );
 
-logger.token('user-ip', req => ((req.body && req.body.ip) || (req.query && req.query.ip) || '').toString().substr(0, 40) || '-');
-logger.token('user-sess', req => (req.body && req.body.sess) || (req.query && req.query.sess) || '-');
+logger.token('user-ip', req => ((req.params && req.params.ip) || '').toString().substr(0, 40) || '-');
+logger.token('user-sess', req => (req.params && req.params.sess) || '-');
 
 logger.token('user', req => (req.user && req.user.toString()) || '-');
 logger.token('url', req => {
@@ -466,6 +478,7 @@ module.exports = done => {
     messagesRoutes(db, server, messageHandler, userHandler, storageHandler);
     storageRoutes(db, server, storageHandler);
     filtersRoutes(db, server);
+    domainaccessRoutes(db, server);
     aspsRoutes(db, server, userHandler);
     totpRoutes(db, server, userHandler);
     custom2faRoutes(db, server, userHandler);
@@ -477,6 +490,7 @@ module.exports = done => {
     auditRoutes(db, server, auditHandler);
     domainaliasRoutes(db, server);
     dkimRoutes(db, server);
+    webhooksRoutes(db, server);
 
     server.on('error', err => {
         if (!started) {

@@ -181,6 +181,16 @@ indexes:
           key:
               user: 1
 
+    # Indexes for the allow/block list collection
+
+    - collection: domainaccess
+      index:
+          name: by_tag
+          key:
+              tagview: 1
+              action: 1
+              domain: 1
+
     # Indexes for the autoreply collection
 
     - collection: autoreplies
@@ -386,6 +396,23 @@ indexes:
               exp: 1
               rdate: 1
 
+    # indexes for address register
+    - collection: addressregister
+      index:
+          name: by_address
+          key:
+              user: 1
+              addrview: 1
+              updated: -1
+
+    - collection: addressregister
+      index:
+          name: by_name
+          key:
+              user: 1
+              name: 1
+              updated: -1
+
     # indexes for deleted messages
     - collection: archived
       index:
@@ -561,6 +588,13 @@ indexes:
               locked: 1
               lockedUntil: 1
 
+    - collection: tasks
+      index:
+          name: task_user
+          key:
+              task: 1
+              user: 1
+
     - collection: audits
       index:
           name: user_expire_time
@@ -611,3 +645,34 @@ indexes:
           name: audit_files_expire
           key:
               metadata.info.expires: 1
+
+    - collection: audit.files
+      type: gridfs # index applies to gridfs database
+      index:
+          name: audit_files_addresses
+          key:
+              metadata.audit: 1
+              metadata.addresses.type: 1
+              metadata.addresses.name: 1
+              metadata.addresses.address: 1
+
+    - collection: audit.files
+      type: gridfs # index applies to gridfs database
+      index:
+          name: audit_files_subject
+          key:
+              metadata.subject: 1
+
+    - collection: webhooks
+      index:
+          name: by_type
+          key:
+              type: 1
+              user: 1
+
+    - collection: webhooks
+      index:
+          name: by_user_type
+          key:
+              user: 1
+              type: 1
