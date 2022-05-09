@@ -11,4 +11,7 @@
     dbname="wildduck-test"
 
 [imap]
-    autoExpunge=false
+
+[lmtp]
+    enabled=true
+    port=2424

@@ -127,12 +127,14 @@ class IMAPConnection extends EventEmitter {
             this.logger.info(
                 {
                     tnx: 'connect',
-                    cid: this.id
+                    cid: this.id,
+                    servername: this._socket && this._socket.servername
                 },
-                '[%s] %s from %s to %s:%s',
+                '[%s] %s from %s to %s %s:%s',
                 this.id,
                 this.secure ? 'Secure connection' : 'Connection',
                 this.session.clientHostname,
+                (this._socket && this._socket.servername) || os.hostname(),
                 this._socket && this._socket.localAddress,
                 this._socket && this._socket.localPort
             );
@@ -201,7 +203,7 @@ class IMAPConnection extends EventEmitter {
      * @param {String|Array} data If data is Array, send a multi-line response
      */
     send(payload, callback) {
-        if (this._socket && this._socket.writable) {
+        if (this._socket && !this._socket.destroyed && this._socket.readyState === 'open') {
             try {
                 this[!this.compression ? '_socket' : '_deflate'].write(payload + '\r\n', 'binary', (...args) => {
                     if (args[0]) {
@@ -412,6 +414,7 @@ class IMAPConnection extends EventEmitter {
         if (err && /SSL[23]*_GET_CLIENT_HELLO|ssl[23]*_read_bytes|ssl_bytes_to_cipher_list/i.test(err.message)) {
             let message = err.message;
             err.message = 'Failed to establish TLS session';
+            err.responseCode = 500;
             err.code = err.code || 'TLSError';
             err.meta = {
                 protocol: 'imap',
@@ -423,6 +426,7 @@ class IMAPConnection extends EventEmitter {
 
         if (!err || !err.message) {
             err = new Error('Socket closed unexpectedly');
+            err.responseCode = 500;
             err.code = 'SocketError';
             err.meta = {
                 remoteAddress: this.remoteAddress

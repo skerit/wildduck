@@ -6,7 +6,7 @@ const POP3Server = require('./lib/pop3/server');
 const UserHandler = require('./lib/user-handler');
 const MessageHandler = require('./lib/message-handler');
 const packageData = require('./package.json');
-const ObjectID = require('mongodb').ObjectID;
+const ObjectId = require('mongodb').ObjectId;
 const db = require('./lib/db');
 const certs = require('./lib/certs');
 const LimitedFetch = require('./lib/limited-fetch');
@@ -37,6 +37,22 @@ const serverOptions = {
     id: {
         name: config.pop3.name || 'WildDuck POP3 Server',
         version: config.pop3.version || packageData.version
+    },
+
+    SNICallback(servername, cb) {
+        certs
+            .getContextForServername(
+                servername,
+                serverOptions,
+                {
+                    source: 'pop3'
+                },
+                {
+                    loggelf: message => loggelf(message)
+                }
+            )
+            .then(context => cb(null, context))
+            .catch(err => cb(err));
     },
 
     // log to console
@@ -162,8 +178,8 @@ const serverOptions = {
                                             .exec(done);
                                     };
 
-                                    updateUIDIndex(() => {
-                                        return callback(null, {
+                                    updateUIDIndex(() =>
+                                        callback(null, {
                                             messages: messages
                                                 // show older first
                                                 .reverse()
@@ -178,8 +194,8 @@ const serverOptions = {
                                                 })),
                                             count: messages.length,
                                             size: messages.reduce((acc, message) => acc + message.size, 0)
-                                        });
-                                    });
+                                        })
+                                    );
                                 });
                         });
                     });
@@ -203,7 +219,7 @@ const serverOptions = {
                 }
                 db.database.collection('messages').findOne(
                     {
-                        _id: new ObjectID(message.id),
+                        _id: new ObjectId(message.id),
                         // shard key
                         mailbox: message.mailbox,
                         uid: message.uid
@@ -323,7 +339,7 @@ function trashMessages(session, messages, callback) {
 }
 
 function markAsSeen(session, messages, callback) {
-    let ids = messages.map(message => new ObjectID(message.id));
+    let ids = messages.map(message => new ObjectId(message.id));
 
     return db.database.collection('mailboxes').findOneAndUpdate(
         {
@@ -335,7 +351,7 @@ function markAsSeen(session, messages, callback) {
             }
         },
         {
-            returnOriginal: false
+            returnDocument: 'after'
         },
         (err, item) => {
             if (err) {
@@ -345,6 +361,7 @@ function markAsSeen(session, messages, callback) {
             let mailboxData = item && item.value;
             if (!item) {
                 let err = new Error('Selected mailbox does not exist');
+                err.responseCode = 404;
                 err.code = 'NoSuchMailbox';
                 return callback(err);
             }
@@ -371,7 +388,7 @@ function markAsSeen(session, messages, callback) {
                 },
                 {
                     multi: true,
-                    w: 1
+                    writeConcern: 1
                 },
                 err => {
                     if (err) {
@@ -384,7 +401,7 @@ function markAsSeen(session, messages, callback) {
                                 command: 'FETCH',
                                 uid: message.uid,
                                 flags: message.flags.concat('\\Seen'),
-                                message: new ObjectID(message.id),
+                                message: new ObjectId(message.id),
                                 modseq: mailboxData.modifyIndex,
                                 // Indicate that unseen values are changed. Not sure how much though
                                 unseenChange: true
@@ -456,7 +473,6 @@ module.exports = done => {
         database: db.database,
         users: db.users,
         redis: db.redis,
-        authlogExpireDays: config.log.authlogExpireDays,
         loggelf: message => loggelf(message)
     });
 

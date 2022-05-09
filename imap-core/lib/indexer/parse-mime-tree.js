@@ -95,10 +95,11 @@ class MIMEParser {
      * @return {String|Boolean} A line from the message
      */
     readLine() {
-        let match = this.rfc822.substr(this._pos).match(/(.*?)(\r*\n|$)/);
+        let match = this.rfc822.substr(this._pos).match(/(.*?)(\r*\n|\r(?!\n)|\r*$)/);
         if (match) {
             this._br = match[2] || false;
             this._pos += match[0].length;
+
             return match[1];
         }
         return false;
@@ -216,7 +217,16 @@ class MIMEParser {
         });
 
         // ensure single value for selected fields
-        ['content-transfer-encoding', 'content-id', 'content-description', 'content-language', 'content-md5', 'content-location'].forEach(key => {
+        [
+            'in-reply-to',
+            'message-id',
+            'content-transfer-encoding',
+            'content-id',
+            'content-description',
+            'content-language',
+            'content-md5',
+            'content-location'
+        ].forEach(key => {
             if (Array.isArray(this._node.parsedHeader[key])) {
                 this._node.parsedHeader[key] = this._node.parsedHeader[key].pop();
             }

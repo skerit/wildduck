@@ -8,7 +8,6 @@
     -   [API Documentation :link:](//docs.wildduck.email/api)
     -   [Error codes](api-error-codes.md)
 -   Additional software
-    -   [WildDuck: dockerized](additional-software/wildduck-dockerized.md)
     -   [WildDuck MTA (Outbound SMTP)](additional-software/wildduck-mta.md)
     -   [Haraka plugin (Inbound SMTP)](additional-software/haraka-plugin.md)
     -   [Rspamd (Spam detection)](additional-software/rspamd.md)
@@ -18,7 +17,9 @@
     -   [Third party projects](additional-software/third-party-projects.md)
 -   In Depth
     -   [Operating WildDuck](in-depth/operating-wildduck.md)
+    -   [Default values](in-depth/default-values.md)
     -   [E-Mail Protocol support](in-depth/protocol-support.md)
+    -   [ACME certificates](in-depth/acme-certificates.md)
     -   [Security implementation](in-depth/security.md)
     -   [Administrating WildDuck via command line](in-depth/command-line.md)
     -   [Attachment deduplication](in-depth/attachment-deduplication.md)

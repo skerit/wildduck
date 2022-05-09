@@ -75,6 +75,13 @@
             "delete:any": ["*"]
         },
 
+        "certs": {
+            "create:any": ["*"],
+            "read:any": ["*"],
+            "update:any": ["*"],
+            "delete:any": ["*"]
+        },
+
         "dkim": {
             "create:any": ["*"],
             "read:any": ["*"],
@@ -97,6 +104,13 @@
         },
 
         "webhooks": {
+            "create:any": ["*"],
+            "read:any": ["*"],
+            "update:any": ["*"],
+            "delete:any": ["*"]
+        },
+
+        "settings": {
             "create:any": ["*"],
             "read:any": ["*"],
             "update:any": ["*"],
@@ -146,6 +160,13 @@
         },
 
         "filters": {
+            "create:any": ["*"],
+            "read:any": ["*"],
+            "update:any": ["*"],
+            "delete:any": ["*"]
+        },
+
+        "certs": {
             "create:any": ["*"],
             "read:any": ["*"],
             "update:any": ["*"],
@@ -364,6 +385,21 @@
         },
 
         "audit": {
+            "create:any": ["*"],
+            "read:any": ["*"],
+            "update:any": ["*"],
+            "delete:any": ["*"]
+        }
+    },
+
+    "auditclient": {
+        "audit": {
+            "read:any": ["*"]
+        }
+    },
+
+    "settings": {
+        "settings": {
             "create:any": ["*"],
             "read:any": ["*"],
             "update:any": ["*"],

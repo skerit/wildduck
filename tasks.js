@@ -9,7 +9,12 @@ const yaml = require('js-yaml');
 const fs = require('fs');
 const MessageHandler = require('./lib/message-handler');
 const MailboxHandler = require('./lib/mailbox-handler');
+const CertHandler = require('./lib/cert-handler');
 const AuditHandler = require('./lib/audit-handler');
+const TaskHandler = require('./lib/task-handler');
+
+const { getCertificate, acquireCert } = require('./lib/acme/certs');
+
 const setupIndexes = yaml.load(fs.readFileSync(__dirname + '/indexes.yaml', 'utf8'));
 const Gelf = require('gelf');
 const os = require('os');
@@ -18,11 +23,15 @@ const taskRestore = require('./lib/tasks/restore');
 const taskUserDelete = require('./lib/tasks/user-delete');
 const taskQuota = require('./lib/tasks/quota');
 const taskAudit = require('./lib/tasks/audit');
+const taskAcme = require('./lib/tasks/acme');
+const taskAcmeUpdate = require('./lib/tasks/acme-update');
 const taskClearFolder = require('./lib/tasks/clear-folder');
 
 let messageHandler;
 let mailboxHandler;
 let auditHandler;
+let taskHandler;
+let certHandler;
 let gcTimeout;
 let taskTimeout;
 let gcLock;
@@ -102,6 +111,18 @@ module.exports.start = callback => {
         loggelf: message => loggelf(message)
     });
 
+    taskHandler = new TaskHandler({
+        database: db.database
+    });
+
+    certHandler = new CertHandler({
+        cipher: config.certs && config.certs.cipher,
+        secret: config.certs && config.certs.secret,
+        database: db.database,
+        redis: db.redis,
+        loggelf: message => loggelf(message)
+    });
+
     let start = () => {
         // setup ready
 
@@ -126,11 +147,31 @@ module.exports.start = callback => {
         }
         let collection = collections[collectionpos++];
         db[collection.type || 'database'].createCollection(collection.collection, collection.options, err => {
-            if (err) {
+            if (err && err.codeName !== 'NamespaceExists') {
                 log.error('Setup', 'Failed creating collection %s %s. %s', collectionpos, JSON.stringify(collection.collection), err.message);
             }
 
             ensureCollections(next);
+        });
+    };
+
+    let deleteindexes = setupIndexes.deleteindexes;
+    let deleteindexpos = 0;
+    let deleteIndexes = next => {
+        if (deleteindexpos >= deleteindexes.length) {
+            return next();
+        }
+        let index = deleteindexes[deleteindexpos++];
+        db[index.type || 'database'].collection(index.collection).dropIndex(index.index, (err, r) => {
+            if (r && r.ok) {
+                log.info('Setup', 'Deleted index %s from %s', index.index, index.collection);
+            }
+
+            if (err && err.codeName !== 'IndexNotFound') {
+                log.error('Setup', 'Failed to delete index %s %s. %s', deleteindexpos, JSON.stringify(index.collection + '.' + index.index), err.message);
+            }
+
+            deleteIndexes(next);
         });
     };
 
@@ -147,21 +188,13 @@ module.exports.start = callback => {
                 log.error('Setup', 'Failed creating index %s %s. %s', indexpos, JSON.stringify(index.collection + '.' + index.index.name), err.message);
             } else if (r.numIndexesAfter !== r.numIndexesBefore) {
                 log.verbose('Setup', 'Created index %s %s', indexpos, JSON.stringify(index.collection + '.' + index.index.name));
-            } else {
-                log.verbose(
-                    'Setup',
-                    'Skipped index %s %s: %s',
-                    indexpos,
-                    JSON.stringify(index.collection + '.' + index.index.name),
-                    r.note || 'No index added'
-                );
             }
 
             ensureIndexes(next);
         });
     };
 
-    gcLock.acquireLock('db_indexes', 1 * 60 * 1000, (err, lock) => {
+    gcLock.acquireLock('db_indexes', 5 * 60 * 1000, (err, lock) => {
         if (err) {
             log.error('GC', 'Failed to acquire lock error=%s', err.message);
             return start();
@@ -170,16 +203,19 @@ module.exports.start = callback => {
         }
 
         ensureCollections(() => {
-            ensureIndexes(() => {
-                // Do not release the indexing lock immediatelly
-                setTimeout(() => {
-                    gcLock.releaseLock(lock, err => {
-                        if (err) {
-                            log.error('GC', 'Failed to release lock error=%s', err.message);
-                        }
-                    });
-                }, 60 * 1000);
-                return start();
+            deleteIndexes(() => {
+                ensureIndexes(() => {
+                    // Do not release the indexing lock immediatelly
+                    setTimeout(() => {
+                        gcLock.releaseLock(lock, err => {
+                            if (err) {
+                                console.error(lock);
+                                log.error('GC', 'Failed to release lock error=%s', err.message);
+                            }
+                        });
+                    }, 60 * 1000);
+                    return start();
+                });
             });
         });
     });
@@ -196,7 +232,9 @@ function clearExpiredMessages() {
             gcTimeout = setTimeout(clearExpiredMessages, consts.GC_INTERVAL);
             gcTimeout.unref();
             return;
-        } else if (!lock.success) {
+        }
+
+        if (!lock.success) {
             log.verbose('GC', 'Lock already acquired');
             gcTimeout = setTimeout(clearExpiredMessages, consts.GC_INTERVAL);
             gcTimeout.unref();
@@ -208,6 +246,7 @@ function clearExpiredMessages() {
         let done = () => {
             gcLock.releaseLock(lock, err => {
                 if (err) {
+                    console.error(lock);
                     log.error('GC', 'Failed to release lock error=%s', err.message);
                 }
                 gcTimeout = setTimeout(clearExpiredMessages, consts.GC_INTERVAL);
@@ -417,145 +456,88 @@ function clearExpiredMessages() {
     });
 }
 
-function runTasks() {
-    // first release expired tasks
-    db.database.collection('tasks').updateMany(
-        {
-            locked: true,
-            lockedUntil: { $lt: new Date() }
-        },
-        {
-            $set: {
-                locked: false,
-                status: 'queued'
-            }
-        },
-        err => {
-            if (err) {
-                log.error('Tasks', 'Failed releasing expired tasks. error=%s', err.message);
-
-                // back off processing tasks for 5 minutes
-                taskTimeout = setTimeout(runTasks, consts.TASK_STARTUP_INTERVAL);
-                taskTimeout.unref();
-                return;
-            }
-
-            let nextTask = () => {
-                // try to fetch a new task from the queue
-                db.database.collection('tasks').findOneAndUpdate(
-                    {
-                        locked: false
-                    },
-                    {
-                        $set: {
-                            locked: true,
-                            lockedUntil: new Date(Date.now() + consts.TASK_LOCK_INTERVAL),
-                            status: 'processing'
-                        }
-                    },
-                    {
-                        returnOriginal: false
-                    },
-                    (err, r) => {
-                        if (err) {
-                            log.error('Tasks', 'Failed releasing expired tasks. error=%s', err.message);
-
-                            // back off processing tasks for 5 minutes
-                            taskTimeout = setTimeout(runTasks, consts.TASK_STARTUP_INTERVAL);
-                            taskTimeout.unref();
-                            return;
-                        }
-                        if (!r || !r.value) {
-                            // no pending tasks found
-                            taskTimeout = setTimeout(runTasks, consts.TASK_IDLE_INTERVAL);
-                            taskTimeout.unref();
-                            return;
-                        }
-
-                        let taskData = r.value;
-
-                        // keep lock alive
-                        let keepAliveTimer;
-                        let processed = false;
-                        let keepAlive = () => {
-                            clearTimeout(keepAliveTimer);
-                            keepAliveTimer = setTimeout(() => {
-                                if (processed) {
-                                    return;
-                                }
-                                db.database.collection('tasks').updateOne(
-                                    {
-                                        _id: taskData._id,
-                                        locked: true
-                                    },
-                                    {
-                                        $set: {
-                                            lockedUntil: new Date(Date.now() + consts.TASK_LOCK_INTERVAL),
-                                            status: 'processing'
-                                        }
-                                    },
-                                    (err, r) => {
-                                        if (!err && !processed && r.matchedCount) {
-                                            keepAlive();
-                                        }
-                                    }
-                                );
-                            }, consts.TASK_UPDATE_INTERVAL);
-                            keepAliveTimer.unref();
-                        };
-
-                        keepAlive();
-
-                        // we have a task to process
-                        processTask(taskData, (err, release) => {
-                            clearTimeout(keepAliveTimer);
-                            processed = true;
-                            if (err) {
-                                log.error('Tasks', 'Failed processing task id=%s error=%s', taskData._id, err.message);
-
-                                // back off processing tasks for 5 minutes
-                                taskTimeout = setTimeout(runTasks, consts.TASK_STARTUP_INTERVAL);
-                                taskTimeout.unref();
-                                return;
-                            }
-                            if (release) {
-                                db.database.collection('tasks').deleteOne(
-                                    {
-                                        _id: taskData._id
-                                    },
-                                    nextTask()
-                                );
-                            } else {
-                                // requeue
-                                db.database.collection('tasks').updateOne(
-                                    {
-                                        _id: taskData._id
-                                    },
-                                    {
-                                        $set: {
-                                            locked: false,
-                                            status: 'queued'
-                                        }
-                                    },
-                                    nextTask()
-                                );
-                            }
-                        });
-                    }
-                );
-            };
-            nextTask();
-        }
-    );
+function timer(ttl) {
+    return new Promise(done => {
+        let t = setTimeout(done, ttl);
+        t.unref();
+    });
 }
 
-function processTask(taskData, callback) {
-    log.verbose('Tasks', 'task=%s', JSON.stringify(taskData));
+async function runTasks() {
+    let pendingCheckTime = 0;
 
-    switch (taskData.task) {
+    let done = false;
+    log.verbose('Tasks', 'Starting task poll loop');
+    while (!done) {
+        if (Date.now() - pendingCheckTime > consts.TASK_RELEASE_DELAYED_INTERVAL) {
+            // Once in a while release pending tasks
+            try {
+                await taskHandler.releasePending();
+            } catch (err) {
+                log.error('Tasks', 'Failed releasing expired tasks. error=%s', err.message);
+                await timer(consts.TASK_IDLE_INTERVAL);
+            }
+
+            // and run recurring ACME checks
+            try {
+                await new Promise((resolve, reject) => {
+                    // run pseudo task
+                    processTask({ type: 'acme-update', _id: 'acme-update-id', lock: 'acme-update-lock' }, {}, err => {
+                        if (err) {
+                            return reject(err);
+                        } else {
+                            resolve();
+                        }
+                    });
+                });
+            } catch (err) {
+                log.error('Tasks', 'Failed running recurring ACME checks. error=%s', err.message);
+                await timer(consts.TASK_IDLE_INTERVAL);
+            }
+
+            pendingCheckTime = Date.now();
+        }
+
+        try {
+            let { data, task } = await taskHandler.getNext();
+            if (!task) {
+                await timer(consts.TASK_IDLE_INTERVAL);
+                continue;
+            }
+
+            try {
+                await new Promise((resolve, reject) => {
+                    processTask(task, data, err => {
+                        if (err) {
+                            return reject(err);
+                        } else {
+                            resolve();
+                        }
+                    });
+                });
+                await taskHandler.release(task, true);
+            } catch (err) {
+                await taskHandler.release(task, false);
+            }
+        } catch (err) {
+            log.error('Tasks', 'Failed to process task queue error=%s', err.message);
+        } finally {
+            await timer(consts.TASK_IDLE_INTERVAL);
+        }
+    }
+
+    // probably should never be reached as the loop should take forever
+    return runTasks();
+}
+
+function processTask(task, data, callback) {
+    log.verbose('Tasks', 'type=%s id=%s data=%s', task.type, task._id, JSON.stringify(data));
+
+    switch (task.type) {
         case 'restore':
             return taskRestore(
-                taskData,
+                task,
+                data,
                 {
                     messageHandler,
                     mailboxHandler,
@@ -571,7 +553,7 @@ function processTask(taskData, callback) {
             );
 
         case 'user-delete':
-            return taskUserDelete(taskData, { loggelf }, err => {
+            return taskUserDelete(task, data, { loggelf }, err => {
                 if (err) {
                     return callback(err);
                 }
@@ -580,7 +562,7 @@ function processTask(taskData, callback) {
             });
 
         case 'quota':
-            return taskQuota(taskData, { loggelf }, err => {
+            return taskQuota(task, data, { loggelf }, err => {
                 if (err) {
                     return callback(err);
                 }
@@ -590,7 +572,8 @@ function processTask(taskData, callback) {
 
         case 'audit':
             return taskAudit(
-                taskData,
+                task,
+                data,
                 {
                     messageHandler,
                     auditHandler,
@@ -605,9 +588,46 @@ function processTask(taskData, callback) {
                 }
             );
 
+        case 'acme':
+            return taskAcme(
+                task,
+                data,
+                {
+                    certHandler,
+                    getCertificate,
+                    loggelf
+                },
+                err => {
+                    if (err) {
+                        return callback(err);
+                    }
+                    // release
+                    callback(null, true);
+                }
+            );
+
+        case 'acme-update':
+            return taskAcmeUpdate(
+                task,
+                data,
+                {
+                    certHandler,
+                    acquireCert,
+                    loggelf
+                },
+                err => {
+                    if (err) {
+                        return callback(err);
+                    }
+                    // release
+                    callback(null, true);
+                }
+            );
+
         case 'clear-folder':
             return taskClearFolder(
-                taskData,
+                task,
+                data,
                 {
                     messageHandler,
                     loggelf

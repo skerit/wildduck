@@ -8,18 +8,10 @@
 ident="wildduck"
 
 # how many processes to start
+# either a number for specific process count or "cpus" for machine thread count
 processes=1
 
-# default quota storage in MB (can be overriden per user)
-maxStorage=1024
-
-# default smtp recipients for 24h (can be overriden per user)
-maxRecipients=2000
-
-# default forwarded messages for 24h (can be overriden per user)
-maxForwards=2000
-
-# If usernames are not email addresses then use this domain as hostname part
+# If usernames are not email addresses then use this domain as default hostname part
 #emailDomain="mydomain.info"
 
 [dbs]
@@ -29,12 +21,16 @@ maxForwards=2000
     # If enabled then encrypt TOTP seed tokens with the secret password. By default TOTP seeds
     # are not encrypted and stored as cleartext. Once set up do not change these values,
     # otherwise decrypting totp seeds is going to fail
-    #cipher="aes192"
     #secret="a secret cat"
+    #cipher="aes192" # only for decrypting legacy values (if there are any)
 
-[u2f]
-    # Fully qualified URL of your website (must use HTTPS!)
-    appId="https://localhost:3000"
+[webauthn]
+    rpId = "example.com" # origin domain
+    rpName = "WildDuck Email Server"
+
+    challengeSize = 64
+    attestation = "none"
+    authenticatorUserVerification = "discouraged"
 
 [attachments]
 # @include "attachments.toml"
@@ -48,7 +44,8 @@ maxForwards=2000
     # changing this value only affects new entries
     # set to false to not log authentication events
     # set to 0 to keep the logs infinitely
-    authlogExpireDays=30
+    # NB! Removed. Use const:authlog:time setting instead
+    #authlogExpireDays=30
 
     [log.gelf]
         enabled=false
@@ -79,6 +76,14 @@ maxForwards=2000
 
 [dkim]
 # @include "dkim.toml"
+
+[acme]
+# @include "acme.toml"
+
+[certs]
+# Encrypt stored TLS private keys with the following password (disabled by default):
+#secret="a secret cat"
+#cipher="aes192" # only for decrypting legacy values (if there are any)
 
 [plugins]
 # @include "plugins/*.toml"

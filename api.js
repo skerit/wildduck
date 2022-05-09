@@ -4,6 +4,7 @@ const config = require('wild-config');
 const restify = require('restify');
 const log = require('npmlog');
 const logger = require('restify-logger');
+const corsMiddleware = require('restify-cors-middleware2');
 const UserHandler = require('./lib/user-handler');
 const MailboxHandler = require('./lib/mailbox-handler');
 const MessageHandler = require('./lib/message-handler');
@@ -18,8 +19,11 @@ const crypto = require('crypto');
 const Gelf = require('gelf');
 const os = require('os');
 const util = require('util');
-const ObjectID = require('mongodb').ObjectID;
+const ObjectId = require('mongodb').ObjectId;
+const tls = require('tls');
+const Lock = require('ioredfour');
 
+const acmeRoutes = require('./lib/api/acme');
 const usersRoutes = require('./lib/api/users');
 const addressesRoutes = require('./lib/api/addresses');
 const mailboxesRoutes = require('./lib/api/mailboxes');
@@ -30,7 +34,7 @@ const domainaccessRoutes = require('./lib/api/domainaccess');
 const aspsRoutes = require('./lib/api/asps');
 const totpRoutes = require('./lib/api/2fa/totp');
 const custom2faRoutes = require('./lib/api/2fa/custom');
-const u2fRoutes = require('./lib/api/2fa/u2f');
+const webauthnRoutes = require('./lib/api/2fa/webauthn');
 const updatesRoutes = require('./lib/api/updates');
 const authRoutes = require('./lib/api/auth');
 const autoreplyRoutes = require('./lib/api/autoreply');
@@ -38,13 +42,17 @@ const submitRoutes = require('./lib/api/submit');
 const auditRoutes = require('./lib/api/audit');
 const domainaliasRoutes = require('./lib/api/domainaliases');
 const dkimRoutes = require('./lib/api/dkim');
+const certsRoutes = require('./lib/api/certs');
 const webhooksRoutes = require('./lib/api/webhooks');
+const settingsRoutes = require('./lib/api/settings');
+const { SettingsHandler } = require('./lib/settings-handler');
 
 let userHandler;
 let mailboxHandler;
 let messageHandler;
 let storageHandler;
 let auditHandler;
+let settingsHandler;
 let notifier;
 let loggelf;
 
@@ -133,14 +141,47 @@ let certOptions = {};
 certs.loadTLSOptions(certOptions, 'api');
 
 if (config.api.secure && certOptions.key) {
-    serverOptions.key = certOptions.key;
+    let httpsServerOptions = {};
+
+    httpsServerOptions.key = certOptions.key;
     if (certOptions.ca) {
-        serverOptions.ca = certOptions.ca;
+        httpsServerOptions.ca = certOptions.ca;
     }
-    serverOptions.certificate = certOptions.cert;
+    httpsServerOptions.cert = certOptions.cert;
+
+    let defaultSecureContext = tls.createSecureContext(httpsServerOptions);
+
+    httpsServerOptions.SNICallback = (servername, cb) => {
+        certs
+            .getContextForServername(
+                servername,
+                httpsServerOptions,
+                {
+                    source: 'API'
+                },
+                {
+                    loggelf: message => loggelf(message)
+                }
+            )
+            .then(context => {
+                cb(null, context || defaultSecureContext);
+            })
+            .catch(err => cb(err));
+    };
+
+    serverOptions.httpsServerOptions = httpsServerOptions;
 }
 
 const server = restify.createServer(serverOptions);
+
+const cors = corsMiddleware({
+    origins: [].concat(config.api.cors.origins || ['*']),
+    allowHeaders: ['X-Access-Token'],
+    allowCredentialsAllOrigins: true
+});
+
+server.pre(cors.preflight);
+server.use(cors.actual);
 
 // disable compression for EventSource response
 // this needs to be called before gzipResponse
@@ -168,8 +209,16 @@ server.use(
     })
 );
 
+// public files
+server.get({ name: 'public_get', path: '/public/*' }, restify.plugins.serveStaticFiles('./public'));
+
 server.use(
     tools.asyncifyJson(async (req, res, next) => {
+        if (['public_get', 'public_post', 'acmeToken'].includes(req.route.name)) {
+            // skip token check for public pages
+            return next();
+        }
+
         let accessToken = req.query.accessToken || req.headers['x-access-token'] || false;
 
         if (req.query.accessToken) {
@@ -320,7 +369,7 @@ server.use(
                         let tokenAuthVersion = Number(tokenData.authVersion) || 0;
                         let userData = await db.users.collection('users').findOne(
                             {
-                                _id: new ObjectID(req.user)
+                                _id: new ObjectId(req.user)
                             },
                             { projection: { authVersion: true } }
                         );
@@ -450,7 +499,6 @@ module.exports = done => {
         users: db.users,
         redis: db.redis,
         messageHandler,
-        authlogExpireDays: config.log.authlogExpireDays,
         loggelf: message => loggelf(message)
     });
 
@@ -470,27 +518,40 @@ module.exports = done => {
         loggelf: message => loggelf(message)
     });
 
+    settingsHandler = new SettingsHandler({ db: db.database });
+
     server.loggelf = message => loggelf(message);
 
-    usersRoutes(db, server, userHandler);
-    addressesRoutes(db, server, userHandler);
+    server.lock = new Lock({
+        redis: db.redis,
+        namespace: 'mail'
+    });
+
+    if (config.acme && config.acme.agent && config.acme.agent.enabled) {
+        acmeRoutes(db, server, { disableRedirect: true });
+    }
+
+    usersRoutes(db, server, userHandler, settingsHandler);
+    addressesRoutes(db, server, userHandler, settingsHandler);
     mailboxesRoutes(db, server, mailboxHandler);
-    messagesRoutes(db, server, messageHandler, userHandler, storageHandler);
+    messagesRoutes(db, server, messageHandler, userHandler, storageHandler, settingsHandler);
     storageRoutes(db, server, storageHandler);
-    filtersRoutes(db, server);
+    filtersRoutes(db, server, userHandler);
     domainaccessRoutes(db, server);
     aspsRoutes(db, server, userHandler);
     totpRoutes(db, server, userHandler);
     custom2faRoutes(db, server, userHandler);
-    u2fRoutes(db, server, userHandler);
+    webauthnRoutes(db, server, userHandler);
     updatesRoutes(db, server, notifier);
     authRoutes(db, server, userHandler);
     autoreplyRoutes(db, server);
-    submitRoutes(db, server, messageHandler, userHandler);
+    submitRoutes(db, server, messageHandler, userHandler, settingsHandler);
     auditRoutes(db, server, auditHandler);
     domainaliasRoutes(db, server);
     dkimRoutes(db, server);
+    certsRoutes(db, server);
     webhooksRoutes(db, server);
+    settingsRoutes(db, server, settingsHandler);
 
     server.on('error', err => {
         if (!started) {

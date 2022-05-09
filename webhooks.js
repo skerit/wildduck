@@ -6,9 +6,11 @@ const Gelf = require('gelf');
 const os = require('os');
 const Queue = require('bull');
 const db = require('./lib/db');
-const { ObjectID } = require('mongodb');
+const tools = require('./lib/tools');
+const { ObjectId } = require('mongodb');
 const axios = require('axios');
 const packageData = require('./package.json');
+const { MARKED_SPAM, MARKED_HAM } = require('./lib/events');
 
 let loggelf;
 
@@ -56,7 +58,7 @@ async function postWebhook(webhook, data) {
         // autodelete
         try {
             await db.users.collection('webhooks').deleteOne({
-                _id: new ObjectID(webhook._id)
+                _id: new ObjectId(webhook._id)
             });
         } catch (err) {
             // ignore
@@ -115,8 +117,8 @@ module.exports.start = callback => {
         }
     };
 
-    const webhooksQueue = new Queue('webhooks', { redis: config.dbs.redis });
-    const webhooksPostQueue = new Queue('webhooks_post', { redis: config.dbs.redis });
+    const webhooksQueue = new Queue('webhooks', typeof config.dbs.redis === 'object' ? { redis: config.dbs.redis } : config.dbs.redis);
+    const webhooksPostQueue = new Queue('webhooks_post', typeof config.dbs.redis === 'object' ? { redis: config.dbs.redis } : config.dbs.redis);
 
     webhooksQueue.process(async job => {
         try {
@@ -136,17 +138,83 @@ module.exports.start = callback => {
 
             const query = { type: { $in: evtList } };
             if (data.user) {
-                query.user = { $in: [new ObjectID(data.user), null] };
+                query.user = { $in: [new ObjectId(data.user), null] };
             }
 
-            let whid = new ObjectID();
+            let whid = new ObjectId();
             let count = 0;
 
             let webhooks = await db.database.collection('webhooks').find(query).toArray();
+
+            if (!webhooks.length) {
+                // ignore this event
+                return;
+            }
+
+            if ([MARKED_SPAM, MARKED_HAM].includes(data.ev)) {
+                let message = new ObjectId(data.message);
+                data.message = data.id;
+                delete data.id;
+
+                let messageData = await db.database.collection('messages').findOne(
+                    { _id: message },
+                    {
+                        projection: {
+                            _id: true,
+                            uid: true,
+                            msgid: true,
+                            subject: true,
+                            mailbox: true,
+                            mimeTree: true,
+                            idate: true
+                        }
+                    }
+                );
+
+                if (!messageData) {
+                    // message already deleted?
+                    return;
+                }
+
+                let parsedHeader = (messageData.mimeTree && messageData.mimeTree.parsedHeader) || {};
+
+                let from = parsedHeader.from ||
+                    parsedHeader.sender || [
+                        {
+                            name: '',
+                            address: (messageData.meta && messageData.meta.from) || ''
+                        }
+                    ];
+
+                let addresses = {
+                    to: [].concat(parsedHeader.to || []),
+                    cc: [].concat(parsedHeader.cc || []),
+                    bcc: [].concat(parsedHeader.bcc || [])
+                };
+
+                tools.decodeAddresses(from);
+                tools.decodeAddresses(addresses.to);
+                tools.decodeAddresses(addresses.cc);
+                tools.decodeAddresses(addresses.bcc);
+
+                if (from && from[0]) {
+                    data.from = from[0];
+                }
+                for (let addrType of ['to', 'cc', 'bcc']) {
+                    if (addresses[addrType] && addresses[addrType].length) {
+                        data[addrType] = addresses[addrType];
+                    }
+                }
+
+                data.messageId = messageData.msgid;
+                data.subject = messageData.subject;
+                data.date = messageData.idate.toISOString();
+            }
+
             for (let webhook of webhooks) {
                 count++;
                 try {
-                    let job = await webhooksPostQueue.add(
+                    await webhooksPostQueue.add(
                         { data: Object.assign({ id: `${whid.toHexString()}:${count}` }, data), webhook },
                         {
                             removeOnComplete: true,
@@ -158,7 +226,6 @@ module.exports.start = callback => {
                             }
                         }
                     );
-                    return job;
                 } catch (err) {
                     // ignore?
                     log.error('Events', err);

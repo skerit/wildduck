@@ -52,9 +52,6 @@ ignoredHosts=[]
 #secure=false
 #ignoreSTARTTLS=true
 
-# If true then EXPUNGE is called after a message gets a \Deleted flag set
-autoExpunge=true
-
 [setup]
 # Public configuration for IMAP
 hostname="localhost"
@@ -66,6 +63,7 @@ secure=true
 ## If certificate path is not defined, use global or built-in self-signed certs
 #key="/path/to/server/key.pem"
 #cert="/path/to/server/cert.pem"
+#dhparam="/path/to/server/dhparam.pem"
 
 ## You can also define extra options for specific TLS settings:
 

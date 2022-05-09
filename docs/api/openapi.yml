@@ -13,20 +13,29 @@ tags:
     - name: Addresses
     - name: ApplicationPasswords
     - name: Archive
+      description: Archive includes all deleted messages. Once messages are old enough then these are permanenetly deleted from the archive as well. Until then you can restore the deleted messages.
     - name: Audit
+      description: 'Auditing allows to monitor an email account. All existing, deleted and new emails are copied to the auditing system. See also https://github.com/nodemailer/wildduck-audit-manager'
     - name: Authentication
     - name: Autoreplies
+    - name: Certs
+      description: WildDuck allows to register TLS certificates to be used with SNI connections. These certificates are used by IMAP, POP3, API and SMTP servers when a SNI capable client establishes a TLS connection. This does not apply for MX servers.
     - name: DKIM
+      description: Whenever an email is sent WildDuck checks if there is a DKIM key registered for the domain name of the sender address and uses it to sign the message.
     - name: DomainAccess
+      description: Add sender domain names to allowlist (messages are all accepted) or blocklist (messages are sent to Spam folder)
     - name: DomainAliases
     - name: Filters
     - name: Mailboxes
     - name: Messages
+    - name: Settings
     - name: Storage
+      description: Storage allows easier attachment handling when composing Draft messages. Instead of uploading the attachmnent with every draft update, you store the attachment to the Storage and then link stored file for the Draft.
     - name: Submission
     - name: TwoFactorAuth
     - name: Users
     - name: Webhooks
+
 paths:
     '/addresses/forwarded/{address}':
         delete:
@@ -172,6 +181,11 @@ paths:
                   description: Partial match of an address
                   schema:
                       type: string
+                - name: forward
+                  in: query
+                  description: Partial match of a forward email address or URL
+                  schema:
+                      type: string
                 - name: tags
                   in: query
                   description: Comma separated list of tags. The Address must have at least one to be set
@@ -206,12 +220,12 @@ paths:
                   in: query
                   description: 'Cursor value for next page, retrieved from nextCursor response value'
                   schema:
-                      type: number
+                      type: string
                 - name: previous
                   in: query
                   description: 'Cursor value for previous page, retrieved from previousCursor response value'
                   schema:
-                      type: number
+                      type: string
             responses:
                 '200':
                     description: Success
@@ -448,17 +462,17 @@ paths:
                   in: query
                   description: Ordering of the records by insert date
                   schema:
-                      type: number
+                      $ref: '#/components/schemas/Order'
                 - name: next
                   in: query
                   description: 'Cursor value for next page, retrieved from nextCursor response value'
                   schema:
-                      type: number
+                      type: string
                 - name: previous
                   in: query
                   description: 'Cursor value for previous page, retrieved from previousCursor response value'
                   schema:
-                      type: number
+                      type: string
             responses:
                 '200':
                     description: Success
@@ -655,12 +669,12 @@ paths:
                   in: query
                   description: 'Cursor value for next page, retrieved from nextCursor response value'
                   schema:
-                      type: number
+                      type: string
                 - name: previous
                   in: query
                   description: 'Cursor value for previous page, retrieved from previousCursor response value'
                   schema:
-                      type: number
+                      type: string
             responses:
                 '200':
                     description: Success
@@ -751,6 +765,7 @@ paths:
               required: true
               schema:
                   type: string
+
     '/dkim/{dkim}':
         delete:
             tags:
@@ -809,12 +824,12 @@ paths:
                   in: query
                   description: 'Cursor value for next page, retrieved from nextCursor response value'
                   schema:
-                      type: number
+                      type: string
                 - name: previous
                   in: query
                   description: 'Cursor value for previous page, retrieved from previousCursor response value'
                   schema:
-                      type: number
+                      type: string
             responses:
                 '200':
                     description: Success
@@ -854,7 +869,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ResolveDkimResponse'
+                                $ref: '#/components/schemas/ResolveIdResponse'
         parameters:
             - name: domain
               in: path
@@ -862,6 +877,133 @@ paths:
               required: true
               schema:
                   type: string
+
+    '/certs/{cert}':
+        delete:
+            tags:
+                - Certs
+            summary: Delete a TLS certificate
+            operationId: deleteTlsCert
+            responses:
+                '200':
+                    description: Success
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/SuccessResponse'
+        get:
+            tags:
+                - Certs
+            summary: Request TLS certificate information
+            operationId: getTLSCerticate
+            responses:
+                '200':
+                    description: Success
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetTLSCertResult'
+        parameters:
+            - name: cert
+              in: path
+              description: ID of the TLS certificate
+              required: true
+              schema:
+                  type: string
+    /certs:
+        get:
+            tags:
+                - Certs
+            summary: List registered TLS certificates
+            operationId: getTLSCerticates
+            parameters:
+                - name: query
+                  in: query
+                  description: Partial match of a server name
+                  schema:
+                      type: string
+                      example: example.com
+                - name: altNames
+                  in: query
+                  description: Match `query` value against SAN as well (including wildcard names)
+                  schema:
+                      type: boolean
+                      example: true
+                      default: false
+                - name: limit
+                  in: query
+                  description: How many records to return
+                  schema:
+                      type: number
+                - name: page
+                  in: query
+                  description: 'Current page number. Informational only, page numbers start from 1'
+                  schema:
+                      type: number
+                - name: next
+                  in: query
+                  description: 'Cursor value for next page, retrieved from nextCursor response value'
+                  schema:
+                      type: string
+                      example: 'eyIkb2lkIjoiNWRmMWZkMmQ3NzkyNTExOGI2MDdjNjg0In0'
+                - name: previous
+                  in: query
+                  description: 'Cursor value for previous page, retrieved from previousCursor response value'
+                  schema:
+                      type: string
+            responses:
+                '200':
+                    description: Success
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetTLSCertsResponse'
+        post:
+            tags:
+                - Certs
+            summary: Create or update TLS certificate for server name
+            description: >
+                Add a new TLS certificate for a server name or update existing one. You can add a single certificate for each server name but SAN names are supported as well.
+                For example you can add a sertificate for "mydomain.com" that includes "\*.mydomain.com" in SAN and the same certificate would be used for requests that do not have it's own server name registered but match the SAN value.
+
+                > NB! you must ensure yourself that the `servername` value is actually listed in certificate's common name or SAN as WildDuck is going to use this certificate regardless.
+            operationId: updateTLSCertificate
+            requestBody:
+                description: Add a new TLS certificate for a server name or update existing one
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateTLSCertRequest'
+                required: true
+            responses:
+                '200':
+                    description: Success
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/UpdateTLSCertResponse'
+
+    '/certs/resolve/{servername}':
+        get:
+            tags:
+                - Certs
+            summary: Resolve ID for a server name
+            operationId: resolveTLSCertificate
+            responses:
+                '200':
+                    description: Success
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ResolveIdResponse'
+        parameters:
+            - name: servername
+              in: path
+              description: Server name
+              required: true
+              schema:
+                  type: string
+
     '/domainaccess/{domain}':
         delete:
             tags:
@@ -1018,12 +1160,12 @@ paths:
                   in: query
                   description: 'Cursor value for next page, retrieved from nextCursor response value'
                   schema:
-                      type: number
+                      type: string
                 - name: previous
                   in: query
                   description: 'Cursor value for previous page, retrieved from previousCursor response value'
                   schema:
-                      type: number
+                      type: string
             responses:
                 '200':
                     description: Success
@@ -1062,7 +1204,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ResolveDomainAliasResponse'
+                                $ref: '#/components/schemas/ResolveIdResponse'
         parameters:
             - name: alias
               in: path
@@ -1127,6 +1269,47 @@ paths:
               required: true
               schema:
                   type: string
+
+    /filters:
+        get:
+            tags:
+                - Filters
+            summary: List all Filters
+            operationId: getAllFilters
+            parameters:
+                - name: forward
+                  in: query
+                  description: Partial match of a forward email address or URL
+                  schema:
+                      type: string
+                - name: limit
+                  in: query
+                  description: How many records to return
+                  schema:
+                      type: number
+                - name: page
+                  in: query
+                  description: 'Current page number. Informational only, page numbers start from 1'
+                  schema:
+                      type: number
+                - name: next
+                  in: query
+                  description: 'Cursor value for next page, retrieved from nextCursor response value'
+                  schema:
+                      type: number
+                - name: previous
+                  in: query
+                  description: 'Cursor value for previous page, retrieved from previousCursor response value'
+                  schema:
+                      type: number
+            responses:
+                '200':
+                    description: Success
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetAllFiltersResponse'
+
     '/users/{user}/filters':
         get:
             tags:
@@ -1360,10 +1543,15 @@ paths:
                   in: query
                   description: 'If true, then returns only unseen messages'
                   schema:
-                      type: number
+                      type: boolean
                 - name: metaData
                   in: query
                   description: 'If true, then includes metaData in the response'
+                  schema:
+                      type: boolean
+                - name: threadCounters
+                  in: query
+                  description: 'If true, then includes threadMessageCount in the response. Counters come with some overhead'
                   schema:
                       type: boolean
                 - name: limit
@@ -1380,17 +1568,17 @@ paths:
                   in: query
                   description: Ordering of the records by insert date
                   schema:
-                      type: number
+                      $ref: '#/components/schemas/Order'
                 - name: next
                   in: query
                   description: 'Cursor value for next page, retrieved from nextCursor response value'
                   schema:
-                      type: number
+                      type: string
                 - name: previous
                   in: query
                   description: 'Cursor value for previous page, retrieved from previousCursor response value'
                   schema:
-                      type: number
+                      type: string
             responses:
                 '200':
                     description: Success
@@ -1421,7 +1609,7 @@ paths:
             tags:
                 - Messages
             summary: Upload Message
-            description: 'This method allows to upload either an RFC822 formatted message or a message structure to a mailbox. Raw message is stored unmodified, no headers are added or removed. If you want to generate the uploaded message from strucutred data fields, then do not use the raw property.'
+            description: 'This method allows to upload either an RFC822 formatted message or a message structure to a mailbox. Raw message is stored unmodified, no headers are added or removed. If you want to generate the uploaded message from structured data fields, then do not use the raw property.'
             operationId: uploadMessage
             requestBody:
                 content:
@@ -1681,6 +1869,21 @@ paths:
                   description: 'Partial match for the Subject: header line'
                   schema:
                       type: string
+                - name: minSize
+                  in: query
+                  description: Minimal message size in bytes
+                  schema:
+                      type: number
+                - name: maxSize
+                  in: query
+                  description: Maximal message size in bytes
+                  schema:
+                      type: number
+                - name: threadCounters
+                  in: query
+                  description: 'If true, then includes threadMessageCount in the response. Counters come with some overhead'
+                  schema:
+                      type: boolean
                 - name: limit
                   in: query
                   description: How many records to return
@@ -1695,12 +1898,12 @@ paths:
                   in: query
                   description: 'Cursor value for next page, retrieved from nextCursor response value'
                   schema:
-                      type: number
+                      type: string
                 - name: previous
                   in: query
                   description: 'Cursor value for previous page, retrieved from previousCursor response value'
                   schema:
-                      type: number
+                      type: string
             responses:
                 '200':
                     description: Success
@@ -1822,12 +2025,12 @@ paths:
                   in: query
                   description: 'Cursor value for next page, retrieved from nextCursor response value'
                   schema:
-                      type: number
+                      type: string
                 - name: previous
                   in: query
                   description: 'Cursor value for previous page, retrieved from previousCursor response value'
                   schema:
-                      type: number
+                      type: string
             responses:
                 '200':
                     description: Success
@@ -1847,10 +2050,19 @@ paths:
                         encoding: {}
                         schema:
                             required:
-                                - body
+                                - content
                             type: object
                             properties:
-                                body:
+                                filename:
+                                    type: string
+                                    description: Name of the file
+                                contentType:
+                                    type: string
+                                    description: MIME type of the file. Is detected from the file name by default
+                                encoding:
+                                    type: string
+                                    description: Encoding of the file content. Useful if you want to upload the file in base64 encoded format. Valid options "base64", "hex", "utf8"
+                                content:
                                     type: string
                                     format: binary
                 required: false
@@ -2194,7 +2406,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ResolveUserResponse'
+                                $ref: '#/components/schemas/ResolveIdResponse'
         parameters:
             - name: username
               in: path
@@ -2203,19 +2415,42 @@ paths:
               schema:
                   type: string
 
-    '/users/{id}/recover':
+    '/users/{id}/restore':
+        get:
+            tags:
+                - Users
+            summary: Return recovery info for a deleted user
+            operationId: restoreUserInfo
+            parameters:
+                - name: sess
+                  in: query
+                  description: Session identifier for the logs
+                  schema:
+                      type: string
+                - name: ip
+                  in: query
+                  description: IP address for the logs
+                  schema:
+                      type: string
+            responses:
+                '200':
+                    description: Success
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RecoverInfoResponse'
         post:
             tags:
                 - Users
             summary: Cancel user deletion task
             description: 'Use this endpoint to cancel a timed deletion task scheduled by `DELETE /user/{id}`. If user data is not yet deleted then the account is fully recovered, except any email addresses that might have been already recycled'
-            operationId: recoverUser
+            operationId: restoreUser
 
             requestBody:
                 content:
                     application/json:
                         schema:
-                            $ref: '#/components/schemas/UserRecoverRequest'
+                            $ref: '#/components/schemas/UserRestoreRequest'
                 required: true
 
             responses:
@@ -2242,6 +2477,11 @@ paths:
                 - name: query
                   in: query
                   description: Partial match of username or default email address
+                  schema:
+                      type: string
+                - name: forward
+                  in: query
+                  description: Partial match of a forward email address or URL
                   schema:
                       type: string
                 - name: tags
@@ -2278,12 +2518,12 @@ paths:
                   in: query
                   description: 'Cursor value for next page, retrieved from nextCursor response value'
                   schema:
-                      type: number
+                      type: string
                 - name: previous
                   in: query
                   description: 'Cursor value for previous page, retrieved from previousCursor response value'
                   schema:
-                      type: number
+                      type: string
             responses:
                 '200':
                     description: Success
@@ -2398,6 +2638,7 @@ paths:
               required: true
               schema:
                   type: string
+
     '/webhooks/{webhook}':
         delete:
             tags:
@@ -2450,12 +2691,12 @@ paths:
                   in: query
                   description: 'Cursor value for next page, retrieved from nextCursor response value'
                   schema:
-                      type: number
+                      type: string
                 - name: previous
                   in: query
                   description: 'Cursor value for previous page, retrieved from previousCursor response value'
                   schema:
-                      type: number
+                      type: string
             responses:
                 '200':
                     description: Success
@@ -2483,6 +2724,106 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/CreateWebhookResponse'
+
+    '/settings/{setting}':
+        get:
+            tags:
+                - Settings
+            summary: Get Setting value
+            operationId: getSetting
+            parameters:
+                - name: sess
+                  in: query
+                  description: Session identifier for the logs
+                  schema:
+                      type: string
+                - name: ip
+                  in: query
+                  description: IP address for the logs
+                  schema:
+                      type: string
+
+            responses:
+                '200':
+                    description: Success
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetSettingResponse'
+
+        post:
+            tags:
+                - Settings
+            summary: Create or Update Setting
+            description: Create a new or update an existing setting
+            operationId: createSetting
+            requestBody:
+                description: Create or Update Setting
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateSettingRequest'
+                required: true
+            responses:
+                '200':
+                    description: Success
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreateSettingResponse'
+
+        delete:
+            tags:
+                - Settings
+            summary: Delete a setting
+            operationId: deleteSetting
+            responses:
+                '200':
+                    description: Success
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/SuccessResponse'
+
+        parameters:
+            - name: setting
+              in: path
+              description: Key of the Setting
+              required: true
+              schema:
+                  type: string
+
+    /settings:
+        get:
+            tags:
+                - Settings
+            summary: List registered Settings
+            operationId: getSettings
+            parameters:
+                - name: filter
+                  in: query
+                  description: 'Optional partial match of the Setting key'
+                  schema:
+                      type: string
+                - name: sess
+                  in: query
+                  description: Session identifier for the logs
+                  schema:
+                      type: string
+                - name: ip
+                  in: query
+                  description: IP address for the logs
+                  schema:
+                      type: string
+
+            responses:
+                '200':
+                    description: Success
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetSettingsResponse'
+
 components:
     schemas:
         AddressLimits:
@@ -2750,6 +3091,9 @@ components:
                 id:
                     type: string
                     description: Attachment ID
+                hash:
+                    type: string
+                    description: SHA-256 hash of the contents of the attachment
                 filename:
                     type: string
                     description: Filename of the attachment
@@ -3205,6 +3549,18 @@ components:
                         - type: string
                 reference:
                     $ref: '#/components/schemas/ReferenceWithAttachments'
+                replacePrevious:
+                    type: object
+                    description: If set, then deletes a previous message when storing the new one. Useful when uploading a new Draft message.
+                    required:
+                        - id
+                    properties:
+                        mailbox:
+                            type: string
+                            description: Mailbox ID. Defaults to the mailbox of the uploaded message.
+                        id:
+                            type: number
+                            description: Message ID in Mailbox
                 sess:
                     type: string
                     description: Session identifier for the logs
@@ -3233,6 +3589,9 @@ components:
                     description: Indicates successful response
                 message:
                     $ref: '#/components/schemas/Message'
+                previousDeleted:
+                    type: boolean
+                    description: Set if replacing a previous message was requested
         ForwardStoredMessageResponse:
             required:
                 - success
@@ -3502,7 +3861,7 @@ components:
                 scopes:
                     type: array
                     items:
-                        type: string
+                        $ref: '#/components/schemas/AspScopes'
                     description: Allowed scopes for the Application Password
                 lastUse:
                     $ref: '#/components/schemas/LastUse'
@@ -3535,12 +3894,15 @@ components:
                 success:
                     type: boolean
                     description: Indicates successful response
+                    example: true
                 id:
                     type: string
                     description: ID of the Application Password
+                    example: '60b91b5cc419d97445f8e57d'
                 password:
                     type: string
                     description: 'Application Specific Password. Generated password is whitespace agnostic, so it could be displayed to the client as "abcd efgh ijkl mnop" instead of "abcdefghijklmnop"'
+                    example: 'aaaaaaaaaaaaaaaa'
                 mobileconfig:
                     type: string
                     description: Base64 encoded mobileconfig file. Generated profile file should be sent to the client with Content-Type value of application/x-apple-aspen-config.
@@ -3696,8 +4058,6 @@ components:
                 - id
                 - action
                 - result
-                - sess
-                - ip
                 - created
             type: object
             properties:
@@ -3723,6 +4083,7 @@ components:
                     type: string
                     description: Datestring of the Event time
                     format: date-time
+
         GetAutoreplyResponse:
             type: object
             properties:
@@ -3761,6 +4122,7 @@ components:
                 - text
                 - start
                 - end
+
         GetDkimKeyResponse:
             required:
                 - success
@@ -3801,6 +4163,7 @@ components:
                     type: string
                     description: Datestring
                     format: date-time
+
         GetDkimKeysResponse:
             required:
                 - success
@@ -3830,7 +4193,43 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/GetDkimKeysResult'
-                    description: Aliases listing
+                    description: DKIM listing
+
+        GetTLSCertsResponse:
+            required:
+                - success
+                - total
+                - page
+                - previousCursor
+                - nextCursor
+                - results
+            type: object
+            properties:
+                success:
+                    type: boolean
+                    description: Indicates successful response
+                total:
+                    type: number
+                    description: How many results were found
+                    example: 541
+                page:
+                    type: number
+                    description: Current page number. Derived from page query argument
+                    example: 1
+                previousCursor:
+                    type: string
+                    description: Either a cursor string or false if there are not any previous results
+                    example: false
+                nextCursor:
+                    type: string
+                    description: Either a cursor string or false if there are not any next results
+                    example: 'eyIkb2lkIjoiNWRmMWZkMmQ3NzkyNTExOGI2MDdjNjg0In0'
+                results:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/GetTLSCertResult'
+                    description: Certificate listing
+
         UpdateDkimKeyResponse:
             required:
                 - success
@@ -3866,7 +4265,47 @@ components:
                     description: 'Public key in DNS format (no prefix/suffix, single line)'
                 dnsTxt:
                     $ref: '#/components/schemas/DnsTxt'
-        ResolveDkimResponse:
+
+        UpdateTLSCertResponse:
+            required:
+                - success
+                - id
+                - servername
+                - fingerprint
+            type: object
+            properties:
+                success:
+                    type: boolean
+                    description: Indicates successful response
+                id:
+                    type: string
+                    description: ID of the certificate
+                    example: '609d201236d1d936948f23b1'
+                servername:
+                    type: string
+                    description: The server name this certificate applies to
+                    example: 'imap.example.com'
+                description:
+                    type: string
+                    description: Key description
+                    example: 'Some notes about this certificate'
+                fingerprint:
+                    type: string
+                    description: Key fingerprint (SHA1)
+                    example: '59:8b:ed:11:5b:4f:ce:b4:e5:1a:2f:35:b1:6f:7d:93:40:c8:2f:9c:38:3b:cd:f4:04:92:a1:0e:17:2c:3f:f3'
+                expires:
+                    type: string
+                    description: Certificate expiration time
+                    example: '2021-06-26T21:55:55.000Z'
+                    format: date-time
+                altNames:
+                    type: array
+                    description: SAN servernames listed in the certificate
+                    items:
+                        type: string
+                    example: ['example.com', 'www.example.com']
+
+        ResolveIdResponse:
             required:
                 - success
                 - id
@@ -3875,9 +4314,56 @@ components:
                 success:
                     type: boolean
                     description: Indicates successful response
+                    example: true
                 id:
                     type: string
-                    description: DKIM unique ID (24 byte hex)
+                    description: Unique ID (24 byte hex)
+                    example: '609d201236d1d936948f23b1'
+
+        RecoverInfoResponse:
+            type: object
+            required:
+                - success
+                - user
+                - username
+                - storageUsed
+                - tags
+                - deleted
+                - recoverableAddresses
+            properties:
+                success:
+                    type: boolean
+                    description: Indicates successful response
+                    example: true
+                user:
+                    type: string
+                    description: ID of the deleted User
+                    example: '609d201236d1d936948f23b1'
+                username:
+                    type: string
+                    description: Username of the User
+                    example: andris
+                storageUsed:
+                    type: number
+                    description: Calculated quota usage for the user
+                    example: 2423070
+                tags:
+                    type: array
+                    items:
+                        type: string
+                    description: List of tags associated with the User
+                    example: ['domain:andrisreinman.com']
+                deleted:
+                    type: string
+                    description: Datestring of the time the user was deleted
+                    format: date-time
+                recoverableAddresses:
+                    type: array
+                    items:
+                        type: string
+                    description: List of email addresses that can be restored
+                    example: ['andris@andrisreinman.com']
+
         GetAllowedDomainResponse:
             required:
                 - success
@@ -3985,6 +4471,7 @@ components:
                     items:
                         $ref: '#/components/schemas/GetDomainAliasesResult'
                     description: Aliases listing
+
         CreateDomainAliasResponse:
             required:
                 - success
@@ -3997,18 +4484,7 @@ components:
                 id:
                     type: string
                     description: ID of the Domain Alias
-        ResolveDomainAliasResponse:
-            required:
-                - success
-                - id
-            type: object
-            properties:
-                success:
-                    type: boolean
-                    description: Indicates successful response
-                id:
-                    type: string
-                    description: Alias unique ID (24 byte hex)
+
         GetFilterResponse:
             required:
                 - success
@@ -4047,6 +4523,36 @@ components:
                 id:
                     type: string
                     description: ID for the created Filter
+        GetAllFiltersResponse:
+            required:
+                - success
+                - total
+                - page
+                - previousCursor
+                - nextCursor
+                - results
+            type: object
+            properties:
+                success:
+                    type: boolean
+                    description: Indicates successful response
+                total:
+                    type: number
+                    description: How many results were found
+                page:
+                    type: number
+                    description: Current page number. Derived from page query argument
+                previousCursor:
+                    type: string
+                    description: Either a cursor string or false if there are not any previous results
+                nextCursor:
+                    type: string
+                    description: Either a cursor string or false if there are not any next results
+                results:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/GetAllFiltersResult'
+                    description: Address listing
         GetFiltersResponse:
             required:
                 - success
@@ -4183,7 +4689,11 @@ components:
                     description: Message-ID header
                 date:
                     type: string
-                    description: Datestring of message header
+                    description: Date string from header
+                    format: date-time
+                idate:
+                    type: string
+                    description: Date string of receive time
                     format: date-time
                 list:
                     $ref: '#/components/schemas/List'
@@ -4320,7 +4830,7 @@ components:
                 results:
                     type: array
                     items:
-                        $ref: '#/components/schemas/SearchMessagesResult'
+                        $ref: '#/components/schemas/GetMessagesResult'
                     description: Message listing
         SubmitStoredMessageResponse:
             type: object
@@ -4437,7 +4947,7 @@ components:
                     description: Main email address of the User
                 retention:
                     type: number
-                    description: Default retention time in ms. false if not enabled
+                    description: Default retention time (in ms). false if not enabled
                 enabled2fa:
                     type: array
                     items:
@@ -4486,7 +4996,7 @@ components:
                 disabledScopes:
                     type: array
                     items:
-                        type: string
+                        $ref: '#/components/schemas/DisabledScopes'
                     description: Disabled scopes for this user
                 hasPasswordSet:
                     type: boolean
@@ -4500,18 +5010,7 @@ components:
                 suspended:
                     type: boolean
                     description: If true then the user can not authenticate
-        ResolveUserResponse:
-            required:
-                - success
-                - id
-            type: object
-            properties:
-                success:
-                    type: boolean
-                    description: Indicates successful response
-                id:
-                    type: string
-                    description: Users unique ID (24 byte hex)
+
         GetUsersResponse:
             required:
                 - success
@@ -4578,6 +5077,7 @@ components:
                 password:
                     type: string
                     description: Temporary password
+
         GetWebhooksResponse:
             required:
                 - success
@@ -4608,6 +5108,7 @@ components:
                     items:
                         $ref: '#/components/schemas/GetWebhooksResult'
                     description: Webhook listing
+
         CreateWebhookResponse:
             required:
                 - success
@@ -4619,7 +5120,57 @@ components:
                     description: Indicates successful response
                 id:
                     type: string
-                    description: ID of the Address
+                    description: ID of the Webhook
+
+        GetSettingResponse:
+            required:
+                - success
+                - id
+            type: object
+            properties:
+                success:
+                    type: boolean
+                    description: Indicates successful response
+                key:
+                    type: string
+                    description: Key of the Setting
+                value:
+                    oneOf:
+                        - type: string
+                        - type: number
+                    description: Setting value
+
+        GetSettingsResponse:
+            required:
+                - success
+                - settings
+            type: object
+            properties:
+                success:
+                    type: boolean
+                    description: Indicates successful response
+                filter:
+                    type: string
+                    description: Partial match if requested
+                settings:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/GetSettingsResult'
+                    description: Setting listing
+
+        CreateSettingResponse:
+            required:
+                - success
+                - id
+            type: object
+            properties:
+                success:
+                    type: boolean
+                    description: Indicates successful response
+                key:
+                    type: string
+                    description: Key of the Setting
+
         UpdateForwardedAddressRequest:
             type: object
             description: ''
@@ -4782,23 +5333,32 @@ components:
                 scopes:
                     type: array
                     items:
-                        type: string
+                        $ref: '#/components/schemas/AspScopes'
                     description: List of scopes this Password applies to. Special scope "*" indicates that this password can be used for any scope except "master"
+                    example: ['imap', 'smtp']
                 generateMobileconfig:
                     type: boolean
                     description: If true then result contains a mobileconfig formatted file with account config
+                    example: true
                 address:
                     type: string
                     description: E-mail address to be used as the account address in mobileconfig file. Must be one of the listed identity addresses of the user. Defaults to the main address of the user
+                    example: 'user@example.com'
+                password:
+                    type: string
+                    description: Optional pregenerated password. Must be 16 characters, latin letters only.
+                    example: 'aaaaaaaaaaaaaaaa'
                 ttl:
                     type: number
                     description: 'TTL in seconds for this password. Every time password is used, TTL is reset to this value'
+                    example: 3600000
                 sess:
                     type: string
                     description: Session identifier for the logs
                 ip:
                     type: string
                     description: IP address for the logs
+                    example: '127.0.0.1'
         RestoreMessageRequest:
             type: object
             properties:
@@ -4894,6 +5454,7 @@ components:
                     type: string
                     description: Datestring of the end of the autoreply or boolean false to disable end checks
                     format: date-time
+
         UpdateDkimKeyRequest:
             required:
                 - domain
@@ -4912,6 +5473,40 @@ components:
                 privateKey:
                     type: string
                     description: 'Pem formatted DKIM private key. If not set then a new 2048 bit RSA key is generated, beware though that it can take several seconds to complete.'
+
+        UpdateTLSCertRequest:
+            required:
+                - servername
+            type: object
+            properties:
+                servername:
+                    type: string
+                    description: Server name this TLS certificate applies to
+                    example: imap.example.com
+                acme:
+                    type: boolean
+                    description: If true then private key and certificate are managed automatically by ACME
+                    example: false
+                privateKey:
+                    type: string
+                    description: PEM formatted TLS private key. Optional if certificate is managed by ACME
+                    example: "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADA..."
+                cert:
+                    type: string
+                    description: 'PEM formatted TLS certificate or a certificate bundle with concatenated certificate and CA chain. Optional if certificate is managed by ACME'
+                    example: "-----BEGIN CERTIFICATE-----\nMIIDEDCCAfg..."
+                ca:
+                    type: array
+                    description: 'CA chain certificates. Not needed if `cert` value is a bundle'
+                    items:
+                        type: string
+                        description: 'PEM formatted TLS certificate'
+                        example: "-----BEGIN CERTIFICATE-----\nMIIDEDCCAfgs..."
+                description:
+                    type: string
+                    description: Certificate description
+                    example: 'Some notes about this certificate'
+
         CreateAllowedDomainRequest:
             required:
                 - domain
@@ -4980,7 +5575,7 @@ components:
                     description: Is the folder hidden or not. Hidden folders can not be opened in IMAP.
                 retention:
                     type: number
-                    description: Retention policy for the Mailbox. Changing retention value only affects messages added to this folder after the change
+                    description: Retention policy for the Mailbox (in ms). Changing retention value only affects messages added to this folder after the change
                 subscribed:
                     type: boolean
                     description: Change Mailbox subscription state
@@ -4999,13 +5594,6 @@ components:
                     type: number
                     description: Retention policy for the created Mailbox. Milliseconds after a message added to mailbox expires. Set to 0 to disable.
         UpdateMessageRequest:
-            required:
-                - message
-                - moveTo
-                - seen
-                - flagged
-                - draft
-                - expires
             type: object
             properties:
                 message:
@@ -5163,8 +5751,6 @@ components:
                     type: string
                     description: IP address for the logs
         UpdateUserRequest:
-            required:
-                - disabledScopes
             type: object
             properties:
                 name:
@@ -5189,7 +5775,7 @@ components:
                     description: A list of tags associated with this user
                 retention:
                     type: number
-                    description: Default retention time in ms. Set to 0 to disable
+                    description: Default retention time (in ms). Set to 0 to disable
                 uploadSentMessages:
                     type: boolean
                     description: 'If true then all messages sent through MSA are also uploaded to the Sent Mail folder. Might cause duplicates with some email clients, so disabled by default.'
@@ -5254,7 +5840,7 @@ components:
                 disabledScopes:
                     type: array
                     items:
-                        type: string
+                        $ref: '#/components/schemas/DisabledScopes'
                     description: 'List of scopes that are disabled for this user ("imap", "pop3", "smtp")'
                 disabled:
                     type: boolean
@@ -5277,7 +5863,6 @@ components:
             required:
                 - username
                 - password
-                - disabledScopes
             type: object
             properties:
                 username:
@@ -5314,7 +5899,7 @@ components:
                     description: If true then autogenerated address gets the same tags as the user
                 retention:
                     type: number
-                    description: Default retention time in ms. Set to 0 to disable
+                    description: Default retention time (in ms). Set to 0 to disable
                 uploadSentMessages:
                     type: boolean
                     description: 'If true then all messages sent through MSA are also uploaded to the Sent Mail folder. Might cause duplicates with some email clients, so disabled by default.'
@@ -5380,7 +5965,7 @@ components:
                 disabledScopes:
                     type: array
                     items:
-                        type: string
+                        $ref: '#/components/schemas/DisabledScopes'
                     description: 'List of scopes that are disabled for this user ("imap", "pop3", "smtp")'
                 fromWhitelist:
                     type: array
@@ -5401,7 +5986,7 @@ components:
                     type: string
                     description: Message to be shown to connected IMAP client
 
-        UserRecoverRequest:
+        UserRestoreRequest:
             type: object
             properties:
                 sess:
@@ -5441,6 +6026,24 @@ components:
                 url:
                     type: string
                     description: URL to POST data to
+
+        CreateSettingRequest:
+            required:
+                - value
+            type: object
+            properties:
+                value:
+                    oneOf:
+                        - type: string
+                        - type: number
+                    description: Setting value
+                sess:
+                    description: Session identifier for the logs
+                    type: string
+                ip:
+                    description: IP address for the logs
+                    type: string
+
         GetAddressesResult:
             required:
                 - id
@@ -5547,7 +6150,7 @@ components:
                 scopes:
                     type: array
                     items:
-                        type: string
+                        $ref: '#/components/schemas/AspScopes'
                     description: Allowed scopes for the Application Password
                 lastUse:
                     $ref: '#/components/schemas/LastUse'
@@ -5605,7 +6208,11 @@ components:
                     description: Message subject
                 date:
                     type: string
-                    description: Datestring
+                    description: Date string from header
+                    format: date-time
+                idate:
+                    type: string
+                    description: Date string of receive time
                     format: date-time
                 intro:
                     type: string
@@ -5629,8 +6236,6 @@ components:
                 - id
                 - action
                 - result
-                - sess
-                - ip
                 - created
             type: object
             properties:
@@ -5653,6 +6258,7 @@ components:
                     type: string
                     description: Datestring of the Event time
                     format: date-time
+
         GetDkimKeysResult:
             required:
                 - id
@@ -5682,6 +6288,53 @@ components:
                     type: string
                     description: Datestring
                     format: date-time
+
+        GetTLSCertResult:
+            required:
+                - id
+                - servername
+                - description
+                - fingerprint
+                - created
+            type: object
+            properties:
+                id:
+                    type: string
+                    description: ID of the certificate
+                    example: '609d201236d1d936948f23b1'
+                servername:
+                    type: string
+                    description: The server name this certificate applies to
+                    example: 'imap.example.com'
+                acme:
+                    type: boolean
+                    description: If true then private key and certificate are managed automatically by ACME
+                    example: false
+                description:
+                    type: string
+                    description: Key description
+                    example: 'Some notes about this certificate'
+                fingerprint:
+                    type: string
+                    description: Key fingerprint (SHA1)
+                    example: '59:8b:ed:11:5b:4f:ce:b4:e5:1a:2f:35:b1:6f:7d:93:40:c8:2f:9c:38:3b:cd:f4:04:92:a1:0e:17:2c:3f:f3'
+                created:
+                    type: string
+                    description: Datestring
+                    format: date-time
+                    example: '2021-05-13T20:06:46.179Z'
+                expires:
+                    type: string
+                    description: Certificate expiration time
+                    example: '2021-06-26T21:55:55.000Z'
+                    format: date-time
+                altNames:
+                    type: array
+                    description: SAN servernames listed in the certificate
+                    items:
+                        type: string
+                    example: ['example.com', 'www.example.com']
+
         GetAllowedDomainResult:
             required:
                 - id
@@ -5722,6 +6375,51 @@ components:
                 domain:
                     type: string
                     description: The domain this alias applies to
+        GetAllFiltersResult:
+            required:
+                - id
+                - user
+                - name
+                - created
+                - query
+                - action
+                - disabled
+            type: object
+            properties:
+                id:
+                    type: string
+                    description: Filter ID
+                user:
+                    type: string
+                    description: User ID
+                name:
+                    type: string
+                    description: Name for the filter
+                created:
+                    type: string
+                    description: Datestring of the time the filter was created
+                    format: date-time
+                query:
+                    type: array
+                    items:
+                        type: array
+                        items:
+                            type: string
+                action:
+                    type: array
+                    items:
+                        type: array
+                        items:
+                            type: string
+                disabled:
+                    type: boolean
+                    description: 'If true, then this filter is ignored'
+                targets:
+                    type: array
+                    items:
+                        type: string
+                    description: List of forwarding targets
+
         GetFiltersResult:
             required:
                 - id
@@ -5788,6 +6486,9 @@ components:
                 subscribed:
                     type: boolean
                     description: Mailbox subscription status. IMAP clients may unsubscribe from a folder.
+                retention:
+                    type: number
+                    description: Default retention policy for this mailbox (in ms). If set then messages added to this maibox will be automatically deleted after retention time.
                 hidden:
                     type: boolean
                     description: Is the folder hidden or not
@@ -5828,6 +6529,9 @@ components:
                 thread:
                     type: string
                     description: ID of the Thread
+                threadMessageCount:
+                    type: number
+                    description: Amount of messages in the Thread. Included if threadCounters query argument was true
                 from:
                     $ref: '#/components/schemas/Address'
                 to:
@@ -5850,7 +6554,11 @@ components:
                     description: Message subject
                 date:
                     type: string
-                    description: Datestring
+                    description: Date string from header
+                    format: date-time
+                idate:
+                    type: string
+                    description: Date string of receive time
                     format: date-time
                 size:
                     type: number
@@ -5881,79 +6589,6 @@ components:
                 metaData:
                     type: object
                     description: Custom metadata value. Included if metaData query argument was true
-        SearchMessagesResult:
-            required:
-                - id
-                - mailbox
-                - thread
-                - from
-                - to
-                - cc
-                - bcc
-                - subject
-                - date
-                - intro
-                - attachments
-                - seen
-                - deleted
-                - flagged
-                - url
-                - contentType
-            type: object
-            properties:
-                id:
-                    type: number
-                    description: ID of the Message
-                mailbox:
-                    type: string
-                    description: ID of the Mailbox
-                thread:
-                    type: string
-                    description: ID of the Thread
-                from:
-                    $ref: '#/components/schemas/Address'
-                to:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/Address'
-                    description: 'Recipients in To: field'
-                cc:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/Address'
-                    description: 'Recipients in Cc: field'
-                bcc:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/Address'
-                    description: 'Recipients in Bcc: field. Usually only available for drafts'
-                subject:
-                    type: string
-                    description: Message subject
-                date:
-                    type: string
-                    description: Datestring
-                    format: date-time
-                intro:
-                    type: string
-                    description: First 128 bytes of the message
-                attachments:
-                    type: boolean
-                    description: Does the message have attachments
-                seen:
-                    type: boolean
-                    description: Is this message alread seen or not
-                deleted:
-                    type: boolean
-                    description: Does this message have a \Deleted flag (should not have as messages are automatically deleted once this flag is set)
-                flagged:
-                    type: boolean
-                    description: Does this message have a \Flagged flag
-                url:
-                    type: string
-                    description: Relative API url for fetching message contents
-                contentType:
-                    $ref: '#/components/schemas/ContentType'
         GetFilesResult:
             required:
                 - id
@@ -6049,6 +6684,7 @@ components:
                 suspended:
                     type: boolean
                     description: If true then the user can not authenticate
+
         GetWebhooksResult:
             required:
                 - id
@@ -6071,6 +6707,55 @@ components:
                 url:
                     type: string
                     description: Webhook URL
+        AspScopes:
+            type: string
+            enum:
+                - imap
+                - pop3
+                - smtp
+                - '*'
+        DisabledScopes:
+            type: string
+            enum:
+                - imap
+                - pop3
+                - smtp
+        Order:
+            type: string
+            enum:
+                - asc
+                - desc
+
+        GetSettingsResult:
+            required:
+                - key
+            type: object
+            properties:
+                key:
+                    type: string
+                    description: Setting key
+                value:
+                    oneOf:
+                        - type: string
+                        - type: number
+                    description: Setting value
+                name:
+                    type: string
+                    description: Setting name
+                description:
+                    type: string
+                    description: Setting description
+                default:
+                    oneOf:
+                        - type: string
+                        - type: number
+                    description: Default value for this key
+                type:
+                    type: string
+                    description: Value subtype
+                custom:
+                    type: boolean
+                    description: If true then the value is set
 
     securitySchemes:
         AccessTokenAuth:
