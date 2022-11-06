@@ -26,6 +26,7 @@ const taskAudit = require('./lib/tasks/audit');
 const taskAcme = require('./lib/tasks/acme');
 const taskAcmeUpdate = require('./lib/tasks/acme-update');
 const taskClearFolder = require('./lib/tasks/clear-folder');
+const taskSearchApply = require('./lib/tasks/search-apply');
 
 let messageHandler;
 let mailboxHandler;
@@ -167,7 +168,7 @@ module.exports.start = callback => {
                 log.info('Setup', 'Deleted index %s from %s', index.index, index.collection);
             }
 
-            if (err && err.codeName !== 'IndexNotFound') {
+            if (err && err.codeName !== 'IndexNotFound' && err.codeName !== 'NamespaceNotFound') {
                 log.error('Setup', 'Failed to delete index %s %s. %s', deleteindexpos, JSON.stringify(index.collection + '.' + index.index), err.message);
             }
 
@@ -184,9 +185,9 @@ module.exports.start = callback => {
         }
         let index = indexes[indexpos++];
         db[index.type || 'database'].collection(index.collection).createIndexes([index.index], (err, r) => {
-            if (err) {
+            if (err && err.codeName !== 'IndexOptionsConflict') {
                 log.error('Setup', 'Failed creating index %s %s. %s', indexpos, JSON.stringify(index.collection + '.' + index.index.name), err.message);
-            } else if (r.numIndexesAfter !== r.numIndexesBefore) {
+            } else if (!err && r.numIndexesAfter !== r.numIndexesBefore) {
                 log.verbose('Setup', 'Created index %s %s', indexpos, JSON.stringify(index.collection + '.' + index.index.name));
             }
 
@@ -209,7 +210,6 @@ module.exports.start = callback => {
                     setTimeout(() => {
                         gcLock.releaseLock(lock, err => {
                             if (err) {
-                                console.error(lock);
                                 log.error('GC', 'Failed to release lock error=%s', err.message);
                             }
                         });
@@ -246,7 +246,6 @@ function clearExpiredMessages() {
         let done = () => {
             gcLock.releaseLock(lock, err => {
                 if (err) {
-                    console.error(lock);
                     log.error('GC', 'Failed to release lock error=%s', err.message);
                 }
                 gcTimeout = setTimeout(clearExpiredMessages, consts.GC_INTERVAL);
@@ -543,10 +542,29 @@ function processTask(task, data, callback) {
                     mailboxHandler,
                     loggelf
                 },
-                err => {
+                (err, result) => {
                     if (err) {
+                        loggelf({
+                            short_message: '[TASKFAIL] restore',
+                            _task_action: 'restore',
+                            _task_id: task._id.toString(),
+                            _user: data.user.toString(),
+                            _task_result: 'error',
+                            _error: err.message
+                        });
+
                         return callback(err);
                     }
+
+                    loggelf({
+                        short_message: '[TASKOK] restore',
+                        _task_action: 'restore',
+                        _task_id: task._id.toString(),
+                        _user: data.user.toString(),
+                        _task_result: 'finished',
+                        _restored_messages: result.restoredMessages
+                    });
+
                     // release
                     callback(null, true);
                 }
@@ -630,6 +648,24 @@ function processTask(task, data, callback) {
                 data,
                 {
                     messageHandler,
+                    loggelf
+                },
+                err => {
+                    if (err) {
+                        return callback(err);
+                    }
+                    // release
+                    callback(null, true);
+                }
+            );
+
+        case 'search-apply':
+            return taskSearchApply(
+                task,
+                data,
+                {
+                    messageHandler,
+                    mailboxHandler,
                     loggelf
                 },
                 err => {

@@ -22,6 +22,7 @@ const util = require('util');
 const ObjectId = require('mongodb').ObjectId;
 const tls = require('tls');
 const Lock = require('ioredfour');
+const Path = require('path');
 
 const acmeRoutes = require('./lib/api/acme');
 const usersRoutes = require('./lib/api/users');
@@ -144,10 +145,7 @@ if (config.api.secure && certOptions.key) {
     let httpsServerOptions = {};
 
     httpsServerOptions.key = certOptions.key;
-    if (certOptions.ca) {
-        httpsServerOptions.ca = certOptions.ca;
-    }
-    httpsServerOptions.cert = certOptions.cert;
+    httpsServerOptions.cert = tools.buildCertChain(certOptions.cert, certOptions.ca);
 
     let defaultSecureContext = tls.createSecureContext(httpsServerOptions);
 
@@ -192,8 +190,6 @@ server.use((req, res, next) => {
     next();
 });
 
-server.use(restify.plugins.gzipResponse());
-
 server.use(
     restify.plugins.queryParser({
         allowDots: true,
@@ -210,7 +206,15 @@ server.use(
 );
 
 // public files
-server.get({ name: 'public_get', path: '/public/*' }, restify.plugins.serveStaticFiles('./public'));
+server.get(
+    { name: 'public_get', path: '/public/*' },
+    restify.plugins.serveStatic({
+        directory: Path.join(__dirname, 'public'),
+        default: 'index.html'
+    })
+);
+
+server.use(restify.plugins.gzipResponse());
 
 server.use(
     tools.asyncifyJson(async (req, res, next) => {
@@ -527,16 +531,13 @@ module.exports = done => {
         namespace: 'mail'
     });
 
-    if (config.acme && config.acme.agent && config.acme.agent.enabled) {
-        acmeRoutes(db, server, { disableRedirect: true });
-    }
-
+    acmeRoutes(db, server, { disableRedirect: true });
     usersRoutes(db, server, userHandler, settingsHandler);
     addressesRoutes(db, server, userHandler, settingsHandler);
     mailboxesRoutes(db, server, mailboxHandler);
     messagesRoutes(db, server, messageHandler, userHandler, storageHandler, settingsHandler);
     storageRoutes(db, server, storageHandler);
-    filtersRoutes(db, server, userHandler);
+    filtersRoutes(db, server, userHandler, settingsHandler);
     domainaccessRoutes(db, server);
     aspsRoutes(db, server, userHandler);
     totpRoutes(db, server, userHandler);
