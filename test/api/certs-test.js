@@ -7,15 +7,16 @@ const chai = require('chai');
 
 const expect = chai.expect;
 chai.config.includeStack = true;
+const config = require('wild-config');
 
-const server = supertest.agent('http://localhost:8080');
+const server = supertest.agent(`http://127.0.0.1:${config.api.port}`);
 
 describe('API Certs', function () {
     let cert;
 
     this.timeout(10000); // eslint-disable-line no-invalid-this
 
-    it('should POST /certs', async () => {
+    it('should POST /certs expect success', async () => {
         const response = await server
             .post('/certs')
             .send({
@@ -81,21 +82,21 @@ rp+tEw==
         cert = response.body.id;
     });
 
-    it('should GET /certs/:cert', async () => {
+    it('should GET /certs/:cert expect success', async () => {
         const response = await server.get(`/certs/${cert}`).expect(200);
 
         expect(response.body.success).to.be.true;
         expect(response.body.id).to.equal(cert);
     });
 
-    it('should GET /certs/resolve/:servername', async () => {
+    it('should GET /certs/resolve/:servername expect success', async () => {
         const response = await server.get(`/certs/resolve/example.com`).expect(200);
 
         expect(response.body.success).to.be.true;
         expect(response.body.id).to.equal(cert);
     });
 
-    it('should GET /certs', async () => {
+    it('should GET /certs expect success', async () => {
         const response = await server.get(`/certs`).expect(200);
 
         expect(response.body.success).to.be.true;
@@ -103,7 +104,7 @@ rp+tEw==
         expect(response.body.results.find(entry => entry.id === cert)).to.exist;
     });
 
-    it('should DELETE /certs/:cert', async () => {
+    it('should DELETE /certs/:certs expect success', async () => {
         const response = await server.delete(`/certs/${cert}`).expect(200);
 
         expect(response.body.success).to.be.true;

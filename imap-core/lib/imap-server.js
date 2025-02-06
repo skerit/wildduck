@@ -7,7 +7,7 @@ const IMAPConnection = require('./imap-connection').IMAPConnection;
 const tlsOptions = require('./tls-options');
 const EventEmitter = require('events').EventEmitter;
 const shared = require('nodemailer/lib/shared');
-const punycode = require('punycode/');
+const punycode = require('punycode.js');
 const base32 = require('base32.js');
 const errors = require('../../lib/errors.js');
 
@@ -402,21 +402,17 @@ class IMAPServer extends EventEmitter {
         }
 
         if (this.options.secure) {
-            // appy changes
-
+            // apply changes
             Object.keys(defaultTlsOptions || {}).forEach(key => {
                 if (!(key in this.options)) {
                     this.options[key] = defaultTlsOptions[key];
                 }
             });
-
-            // ensure SNICallback method
-            if (typeof this.options.SNICallback !== 'function') {
-                // create default SNI handler
-                this.options.SNICallback = (servername, cb) => {
-                    cb(null, this.secureContext.get(servername));
-                };
-            }
+        } else if (typeof this.options.SNICallback !== 'function') {
+            // ensure SNICallback method and create default SNI handler
+            this.options.SNICallback = (servername, cb) => {
+                cb(null, this.secureContext.get(servername));
+            };
         }
     }
 

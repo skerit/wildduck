@@ -7,15 +7,35 @@ const chai = require('chai');
 
 const expect = chai.expect;
 chai.config.includeStack = true;
+const config = require('wild-config');
 
-const server = supertest.agent('http://localhost:8080');
+const server = supertest.agent(`http://127.0.0.1:${config.api.port}`);
 
 describe('API DKIM', function () {
     let dkim;
 
     this.timeout(10000); // eslint-disable-line no-invalid-this
 
-    it('should POST /dkim', async () => {
+    it('should POST /dkim expect success / key empty', async () => {
+        const response = await server
+            .post('/dkim')
+            .send({
+                domain: 'example.com',
+                selector: 'wildduck',
+                description: 'Some text about this DKIM certificate',
+                sess: '12345',
+                ip: '127.0.0.1'
+            })
+            .expect(200);
+        expect(response.body.success).to.be.true;
+        expect(/^[0-9a-f]{24}$/.test(response.body.id)).to.be.true;
+        dkim = response.body.id;
+        expect(response.body.dnsTxt.value).to.not.be.undefined;
+        expect(response.body.dnsTxt.value.split('p=').length).to.be.equal(2); // check that splitting is correct
+        expect(response.body.dnsTxt.value.split('p=')[1]).to.be.not.empty; // check that we actually have the key part and it is not an empty string
+    });
+
+    it('should POST /dkim expect success / RSA pem', async () => {
         const response = await server
             .post('/dkim')
             .send({
@@ -33,20 +53,54 @@ describe('API DKIM', function () {
         dkim = response.body.id;
     });
 
-    it('should GET /dkim/:dkim', async () => {
+    it('should POST /dkim expect success / ED25519 pem', async () => {
+        const response = await server
+            .post('/dkim')
+            .send({
+                domain: 'example.com',
+                selector: 'wildduck',
+                privateKey: '-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIOQu92qofG/p0yAHDTNAawKchxOf/3MpDiPaCPk2xSPg\n-----END PRIVATE KEY-----',
+                description: 'Some text about this DKIM certificate',
+                sess: '12345',
+                ip: '127.0.0.1'
+            })
+            .expect(200);
+        expect(response.body.success).to.be.true;
+        expect(/^[0-9a-f]{24}$/.test(response.body.id)).to.be.true;
+        dkim = response.body.id;
+    });
+
+    it('should POST /dkim expect success / ED25519 raw', async () => {
+        const response = await server
+            .post('/dkim')
+            .send({
+                domain: 'example.com',
+                selector: 'wildduck',
+                privateKey: 'nWGxne/9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A=',
+                description: 'Some text about this DKIM certificate',
+                sess: '12345',
+                ip: '127.0.0.1'
+            })
+            .expect(200);
+        expect(response.body.success).to.be.true;
+        expect(/^[0-9a-f]{24}$/.test(response.body.id)).to.be.true;
+        dkim = response.body.id;
+    });
+
+    it('should GET /dkim/:dkim expect success', async () => {
         const response = await server.get(`/dkim/${dkim}`).expect(200);
 
         expect(response.body.success).to.be.true;
         expect(response.body.id).to.equal(dkim);
     });
 
-    it('should GET /dkim/resolve/:domain', async () => {
+    it('should GET /dkim/resolve/:domain expect success', async () => {
         const response = await server.get(`/dkim/resolve/example.com`).expect(200);
         expect(response.body.success).to.be.true;
         expect(response.body.id).to.equal(dkim);
     });
 
-    it('should GET /dkim', async () => {
+    it('should GET /dkim expect success', async () => {
         const response = await server.get(`/dkim`).expect(200);
 
         expect(response.body.success).to.be.true;
@@ -54,7 +108,7 @@ describe('API DKIM', function () {
         expect(response.body.results.find(entry => entry.id === dkim)).to.exist;
     });
 
-    it('should DELETE /dkim/:dkim', async () => {
+    it('should DELETE /dkim/:dkim expect success', async () => {
         const response = await server.delete(`/dkim/${dkim}`).expect(200);
 
         expect(response.body.success).to.be.true;

@@ -70,7 +70,7 @@ module.exports = {
 
         let logdata = {
             short_message: '[RENAME]',
-            _mail_action: 'create',
+            _mail_action: 'rename',
             _path: path,
             _destination: newname,
             _user: this.session.user.id.toString(),
@@ -85,7 +85,7 @@ module.exports = {
                 this._server.loggelf(logdata);
                 return callback(null, {
                     response: 'NO',
-                    code: 'TEMPFAIL'
+                    code: err.code || 'TEMPFAIL'
                 });
             }
 

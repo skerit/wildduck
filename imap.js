@@ -36,6 +36,7 @@ const onMove = require('./lib/handlers/on-move');
 const onSearch = require('./lib/handlers/on-search');
 const onGetQuotaRoot = require('./lib/handlers/on-get-quota-root');
 const onGetQuota = require('./lib/handlers/on-get-quota');
+const onXAPPLEPUSHSERVICE = require('./lib/handlers/on-xapplepushservice');
 
 let logger = {
     info(...args) {
@@ -77,6 +78,8 @@ let createInterface = (ifaceOptions, callback) => {
             vendor: config.imap.vendor || 'Kreata'
         },
 
+        aps: config.imap.aps,
+
         logger,
 
         maxMessage: config.imap.maxMB * 1024 * 1024,
@@ -104,6 +107,8 @@ let createInterface = (ifaceOptions, callback) => {
     };
 
     certs.loadTLSOptions(serverOptions, 'imap');
+
+    serverOptions.logoutMessages = config.imap.quotes;
 
     const server = new IMAPServer(serverOptions);
 
@@ -154,6 +159,7 @@ let createInterface = (ifaceOptions, callback) => {
     server.onSearch = onSearch(server);
     server.onGetQuotaRoot = onGetQuotaRoot(server);
     server.onGetQuota = onGetQuota(server);
+    server.onXAPPLEPUSHSERVICE = onXAPPLEPUSHSERVICE(server);
 
     if (loggelf) {
         server.loggelf = loggelf;

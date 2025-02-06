@@ -13,7 +13,9 @@ const EventEmitter = require('events').EventEmitter;
 const packageInfo = require('../../package');
 const errors = require('../../lib/errors.js');
 
-const SOCKET_TIMEOUT = 5 * 60 * 1000;
+// Shift timeout by 37 seconds (randomly selected by myself, no specific meaning) to
+// avoid race conditions where both the client and the server wait for 5 minutes
+const SOCKET_TIMEOUT = 5 * 60 * 1000 + 37 * 1000;
 
 /**
  * Creates a handler for new socket
@@ -93,16 +95,26 @@ class IMAPConnection extends EventEmitter {
         this._closing = false;
         this._closed = false;
 
-        this.logger = {};
-        ['info', 'debug', 'error'].forEach(level => {
-            this.logger[level] = (...args) => {
-                if (!this.ignore) {
-                    this._server.logger[level](...args);
-                }
-            };
-        });
+        this._closingTimeout = null;
 
-        this.loggelf = () => false;
+        if (server.logger) {
+            this.logger = server.logger;
+        } else {
+            this.logger = {};
+            ['info', 'debug', 'error'].forEach(level => {
+                this.logger[level] = (...args) => {
+                    if (!this.ignore) {
+                        this._server.logger[level](...args);
+                    }
+                };
+            });
+        }
+
+        if (server.loggelf) {
+            this.loggelf = server.loggelf;
+        } else {
+            this.loggelf = () => false;
+        }
     }
 
     /**
@@ -239,7 +251,7 @@ class IMAPConnection extends EventEmitter {
                 return this.close();
             }
             if (this.compression) {
-                // make sure we transmit the message immediatelly
+                // make sure we transmit the message immediately
                 this._deflate.flush();
             }
             this.logger.debug(
@@ -286,6 +298,7 @@ class IMAPConnection extends EventEmitter {
 
                 setImmediate(() => this._onClose());
             }, 1500);
+            this._closingTimeout.unref();
         }
 
         this._closing = true;
@@ -494,7 +507,13 @@ class IMAPConnection extends EventEmitter {
         }
 
         if (!command.final) {
-            currentCommand.append(command, callback);
+            currentCommand.append(command, (err, ...args) => {
+                if (err) {
+                    // cancel pending command
+                    this._currentCommand = false;
+                }
+                callback(err, ...args);
+            });
         } else {
             this._currentCommand = false;
             currentCommand.end(command, callback);
@@ -610,7 +629,7 @@ class IMAPConnection extends EventEmitter {
                     // append received notifications to the list
                     conn.selected.notifications = conn.selected.notifications.concat(updates);
                     if (conn.idling) {
-                        // when idling emit notifications immediatelly
+                        // when idling emit notifications immediately
                         conn.emitNotifications();
                     }
                 });

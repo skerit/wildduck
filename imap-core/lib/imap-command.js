@@ -49,7 +49,8 @@ const commands = new Map([
     ['GETQUOTAROOT', require('./commands/getquotaroot')],
     ['SETQUOTA', require('./commands/setquota')],
     ['GETQUOTA', require('./commands/getquota')],
-    ['COMPRESS', require('./commands/compress')]
+    ['COMPRESS', require('./commands/compress')],
+    ['XAPPLEPUSHSERVICE', require('./commands/xapplepushservice')]
     /*eslint-enable global-require*/
 ]);
 
@@ -146,9 +147,32 @@ class IMAPCommand {
                 if (command.expecting > maxAllowed) {
                     // APPENDLIMIT response for too large messages
                     // TOOBIG: https://tools.ietf.org/html/rfc4469#section-4.2
-                    this.connection.send(this.tag + ' NO [TOOBIG] Literal too large');
+
+                    let errorMessage;
+                    if (this.command === 'APPEND') {
+                        errorMessage = `Message size exceeds allowed limit: attempted ${command.expecting} bytes, but maximum allowed is ${maxAllowed} bytes.`;
+                    } else {
+                        errorMessage = 'Literal too large';
+                    }
+
+                    this.connection?.loggelf({
+                        short_message: `[TOOBIG] Literal too large`,
+                        _error: 'toobig',
+                        _error_response: `${this.tag} NO [TOOBIG] ${errorMessage}`,
+                        _service: 'imap',
+                        _command: this.command,
+                        _payload: this.payload ? (this.payload.length < 256 ? this.payload : this.payload.toString().substring(0, 256) + '...') : command.value,
+                        _literal_expecting: command.expecting,
+                        _literal_allowed: maxAllowed,
+                        _sess: this.connection?.session?.id,
+                        _user: this.connection?.user?.id,
+                        _cid: this.connection?.id,
+                        _ip: this.remoteAddress
+                    });
+
+                    this.connection.send(`${this.tag} NO [TOOBIG] ${errorMessage}`);
                 } else {
-                    this.connection.send(this.tag + ' NO Literal too large');
+                    this.connection.send(`${this.tag} NO Literal too large`);
                 }
 
                 let err = new Error('Literal too large');
@@ -384,6 +408,12 @@ class IMAPCommand {
             let err = new Error('Not enough arguments provided');
             err.responseCode = 400;
             err.code = 'InvalidArguments';
+            err.meta = {
+                validation_command: this.command,
+                validation_schema: JSON.stringify(schema || null).substring(0, 255),
+                validation_minArgs: minArgs,
+                validation_attributes: JSON.stringify(parsed.attributes || null).substring(0, 255)
+            };
             return callback(err);
         }
 
@@ -393,7 +423,7 @@ class IMAPCommand {
     countBadResponses() {
         this.connection._badCount++;
         if (this.connection._badCount > MAX_BAD_COMMANDS) {
-            this.clearNotificationListener();
+            this.connection.clearNotificationListener();
             this.connection.send('* BYE Too many protocol errors');
             setImmediate(() => this.connection.close(true));
             return false;

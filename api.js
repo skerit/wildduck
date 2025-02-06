@@ -23,6 +23,7 @@ const ObjectId = require('mongodb').ObjectId;
 const tls = require('tls');
 const Lock = require('ioredfour');
 const Path = require('path');
+const errors = require('restify-errors');
 
 const acmeRoutes = require('./lib/api/acme');
 const usersRoutes = require('./lib/api/users');
@@ -46,7 +47,13 @@ const dkimRoutes = require('./lib/api/dkim');
 const certsRoutes = require('./lib/api/certs');
 const webhooksRoutes = require('./lib/api/webhooks');
 const settingsRoutes = require('./lib/api/settings');
+const healthRoutes = require('./lib/api/health');
 const { SettingsHandler } = require('./lib/settings-handler');
+
+const { RestifyApiGenerate } = require('restifyapigenerate');
+const Joi = require('joi');
+const restifyApiGenerateConfig = require('./config/apigeneration.json');
+const restifyApiGenerate = new RestifyApiGenerate(Joi, __dirname);
 
 let userHandler;
 let mailboxHandler;
@@ -94,11 +101,15 @@ const serverOptions = {
             };
 
             Object.keys(req.params || {}).forEach(key => {
-                let value = typeof req.params[key] === 'string' ? req.params[key] : util.inspect(req.params[key], false, 3).toString().trim();
+                let value = req.params[key];
 
-                if (!value) {
+                if (!value && value !== 0) {
+                    // if falsy don't continue, allow 0 integer as value
                     return;
                 }
+
+                // cast value to string if not string
+                value = typeof req.params[key] === 'string' ? req.params[key] : util.inspect(req.params[key], false, 3).toString().trim();
 
                 if (['password'].includes(key)) {
                     value = '***';
@@ -174,7 +185,7 @@ const server = restify.createServer(serverOptions);
 
 const cors = corsMiddleware({
     origins: [].concat(config.api.cors.origins || ['*']),
-    allowHeaders: ['X-Access-Token'],
+    allowHeaders: ['X-Access-Token', 'Authorization'],
     allowCredentialsAllOrigins: true
 });
 
@@ -183,11 +194,10 @@ server.use(cors.actual);
 
 // disable compression for EventSource response
 // this needs to be called before gzipResponse
-server.use((req, res, next) => {
-    if (req.route.path === '/users/:user/updates') {
+server.use(async (req, res) => {
+    if (res && req.route.path === '/users/:user/updates') {
         req.headers['accept-encoding'] = '';
     }
-    next();
 });
 
 server.use(
@@ -200,114 +210,123 @@ server.use(
     restify.plugins.bodyParser({
         maxBodySize: 0,
         mapParams: true,
-        mapFiles: false,
+        mapFiles: true,
         overrideParams: false
     })
 );
 
 // public files
 server.get(
-    { name: 'public_get', path: '/public/*' },
+    { name: 'public_get', path: '/public/*', excludeRoute: true },
     restify.plugins.serveStatic({
         directory: Path.join(__dirname, 'public'),
         default: 'index.html'
     })
 );
 
-server.use(restify.plugins.gzipResponse());
+// Disable GZIP as it does not work with stream.pipe(res)
+//server.use(restify.plugins.gzipResponse());
 
-server.use(
-    tools.asyncifyJson(async (req, res, next) => {
-        if (['public_get', 'public_post', 'acmeToken'].includes(req.route.name)) {
-            // skip token check for public pages
-            return next();
-        }
+server.use(async (req, res) => {
+    if (['public_get', 'public_post', 'acmeToken'].includes(req.route.name)) {
+        // skip token check for public pages
+        return;
+    }
 
-        let accessToken = req.query.accessToken || req.headers['x-access-token'] || false;
+    let accessToken =
+        req.query.accessToken ||
+        req.headers['x-access-token'] ||
+        (req.headers.authorization ? req.headers.authorization.replace(/^Bearer\s+/i, '').trim() : false) ||
+        false;
 
-        if (req.query.accessToken) {
-            // delete or it will conflict with Joi schemes
-            delete req.query.accessToken;
-        }
+    if (req.query.accessToken) {
+        // delete or it will conflict with Joi schemes
+        delete req.query.accessToken;
+    }
 
-        if (req.params.accessToken) {
-            // delete or it will conflict with Joi schemes
-            delete req.params.accessToken;
-        }
+    if (req.params.accessToken) {
+        // delete or it will conflict with Joi schemes
+        delete req.params.accessToken;
+    }
 
-        if (req.headers['x-access-token']) {
-            req.headers['x-access-token'] = '';
-        }
+    if (req.headers['x-access-token']) {
+        req.headers['x-access-token'] = '';
+    }
 
-        let tokenRequired = false;
+    if (req.headers.authorization) {
+        req.headers.authorization = '';
+    }
 
-        let fail = () => {
-            res.status(403);
-            res.charSet('utf-8');
-            return res.json({
-                error: 'Invalid accessToken value',
+    let tokenRequired = false;
+
+    let fail = () => {
+        let error = new errors.ForbiddenError(
+            {
                 code: 'InvalidToken'
-            });
-        };
+            },
+            'Invalid accessToken value'
+        );
+        throw error;
+    };
 
-        req.validate = permission => {
-            if (!permission.granted) {
-                let err = new Error('Not enough privileges');
-                err.responseCode = 403;
-                err.code = 'MissingPrivileges';
+    req.validate = permission => {
+        if (!permission.granted) {
+            let err = new Error('Not enough privileges');
+            err.responseCode = 403;
+            err.code = 'MissingPrivileges';
+            throw err;
+        }
+    };
+
+    // hard coded master token
+    if (config.api.accessToken) {
+        tokenRequired = true;
+        if (config.api.accessToken === accessToken) {
+            req.role = 'root';
+            req.user = 'root';
+            return;
+        }
+    }
+
+    if (config.api.accessControl.enabled || accessToken) {
+        tokenRequired = true;
+        if (accessToken && accessToken.length === 40 && /^[a-fA-F0-9]{40}$/.test(accessToken)) {
+            let tokenData;
+            let tokenHash = crypto.createHash('sha256').update(accessToken).digest('hex');
+
+            try {
+                let key = 'tn:token:' + tokenHash;
+                tokenData = await db.redis.hgetall(key);
+            } catch (err) {
+                err.responseCode = 500;
+                err.code = 'InternalDatabaseError';
                 throw err;
             }
-        };
 
-        // hard coded master token
-        if (config.api.accessToken) {
-            tokenRequired = true;
-            if (config.api.accessToken === accessToken) {
-                req.role = 'root';
-                req.user = 'root';
-                return next();
-            }
-        }
-
-        if (config.api.accessControl.enabled || accessToken) {
-            tokenRequired = true;
-            if (accessToken && accessToken.length === 40 && /^[a-fA-F0-9]{40}$/.test(accessToken)) {
-                let tokenData;
-                let tokenHash = crypto.createHash('sha256').update(accessToken).digest('hex');
-
-                try {
-                    let key = 'tn:token:' + tokenHash;
-                    tokenData = await db.redis.hgetall(key);
-                } catch (err) {
-                    err.responseCode = 500;
-                    err.code = 'InternalDatabaseError';
-                    throw err;
+            if (tokenData && tokenData.user && tokenData.role && config.api.roles[tokenData.role]) {
+                let signData;
+                if ('authVersion' in tokenData) {
+                    // cast value to number
+                    tokenData.authVersion = Number(tokenData.authVersion) || 0;
+                    signData = {
+                        token: accessToken,
+                        user: tokenData.user,
+                        authVersion: tokenData.authVersion,
+                        role: tokenData.role
+                    };
+                } else {
+                    signData = {
+                        token: accessToken,
+                        user: tokenData.user,
+                        role: tokenData.role
+                    };
                 }
 
-                if (tokenData && tokenData.user && tokenData.role && config.api.roles[tokenData.role]) {
-                    let signData;
-                    if ('authVersion' in tokenData) {
-                        // cast value to number
-                        tokenData.authVersion = Number(tokenData.authVersion) || 0;
-                        signData = {
-                            token: accessToken,
-                            user: tokenData.user,
-                            authVersion: tokenData.authVersion,
-                            role: tokenData.role
-                        };
-                    } else {
-                        signData = {
-                            token: accessToken,
-                            user: tokenData.user,
-                            role: tokenData.role
-                        };
-                    }
+                let signature = crypto.createHmac('sha256', config.api.accessControl.secret).update(JSON.stringify(signData)).digest('hex');
 
-                    let signature = crypto.createHmac('sha256', config.api.accessControl.secret).update(JSON.stringify(signData)).digest('hex');
-
-                    if (signature !== tokenData.s) {
-                        // rogue token or invalidated secret
-                        /*
+                if (signature !== tokenData.s) {
+                    // rogue token or invalidated secret
+                    /*
                         // do not delete just in case there is something wrong with the check
                         try {
                             await db.redis
@@ -318,99 +337,98 @@ server.use(
                             // ignore
                         }
                         */
-                    } else if (tokenData.ttl && !isNaN(tokenData.ttl) && Number(tokenData.ttl) > 0) {
-                        let tokenTTL = Number(tokenData.ttl);
-                        let tokenLifetime = config.api.accessControl.tokenLifetime || consts.ACCESS_TOKEN_MAX_LIFETIME;
+                } else if (tokenData.ttl && !isNaN(tokenData.ttl) && Number(tokenData.ttl) > 0) {
+                    let tokenTTL = Number(tokenData.ttl);
+                    let tokenLifetime = config.api.accessControl.tokenLifetime || consts.ACCESS_TOKEN_MAX_LIFETIME;
 
-                        // check if token is not too old
-                        if ((Date.now() - Number(tokenData.created)) / 1000 < tokenLifetime) {
-                            // token is still usable, increase session length
-                            try {
-                                await db.redis
-                                    .multi()
-                                    .expire('tn:token:' + tokenHash, tokenTTL)
-                                    .exec();
-                            } catch (err) {
-                                // ignore
-                            }
-                            req.role = tokenData.role;
-                            req.user = tokenData.user;
-
-                            // make a reference to original method, otherwise might be overrided
-                            let setAuthToken = userHandler.setAuthToken.bind(userHandler);
-
-                            req.accessToken = {
-                                hash: tokenHash,
-                                user: tokenData.user,
-                                // if called then refreshes token data for current hash
-                                update: async () => setAuthToken(tokenData.user, accessToken)
-                            };
-                        } else {
-                            // expired token, clear it
-                            try {
-                                await db.redis
-                                    .multi()
-                                    .del('tn:token:' + tokenHash)
-                                    .exec();
-                            } catch (err) {
-                                // ignore
-                            }
+                    // check if token is not too old
+                    if ((Date.now() - Number(tokenData.created)) / 1000 < tokenLifetime) {
+                        // token is still usable, increase session length
+                        try {
+                            await db.redis
+                                .multi()
+                                .expire('tn:token:' + tokenHash, tokenTTL)
+                                .exec();
+                        } catch (err) {
+                            // ignore
                         }
-                    } else {
                         req.role = tokenData.role;
                         req.user = tokenData.user;
-                    }
 
-                    if (req.params && req.params.user === 'me' && /^[0-9a-f]{24}$/i.test(req.user)) {
-                        req.params.user = req.user;
-                    }
+                        // make a reference to original method, otherwise might be overridden
+                        let setAuthToken = userHandler.setAuthToken.bind(userHandler);
 
-                    if (!req.role) {
-                        return fail();
+                        req.accessToken = {
+                            hash: tokenHash,
+                            user: tokenData.user,
+                            // if called then refreshes token data for current hash
+                            update: async () => setAuthToken(tokenData.user, accessToken)
+                        };
+                    } else {
+                        // expired token, clear it
+                        try {
+                            await db.redis
+                                .multi()
+                                .del('tn:token:' + tokenHash)
+                                .exec();
+                        } catch (err) {
+                            // ignore
+                        }
                     }
+                } else {
+                    req.role = tokenData.role;
+                    req.user = tokenData.user;
+                }
 
-                    if (/^[0-9a-f]{24}$/i.test(req.user)) {
-                        let tokenAuthVersion = Number(tokenData.authVersion) || 0;
-                        let userData = await db.users.collection('users').findOne(
-                            {
-                                _id: new ObjectId(req.user)
-                            },
-                            { projection: { authVersion: true } }
-                        );
-                        let userAuthVersion = Number(userData && userData.authVersion) || 0;
-                        if (!userData || tokenAuthVersion < userAuthVersion) {
-                            // unknown user or expired session
-                            try {
-                                /*
+                if (req.params && req.params.user === 'me' && /^[0-9a-f]{24}$/i.test(req.user)) {
+                    req.params.user = req.user;
+                }
+
+                if (!req.role) {
+                    return fail();
+                }
+
+                if (/^[0-9a-f]{24}$/i.test(req.user)) {
+                    let tokenAuthVersion = Number(tokenData.authVersion) || 0;
+                    let userData = await db.users.collection('users').findOne(
+                        {
+                            _id: new ObjectId(req.user)
+                        },
+                        { projection: { authVersion: true } }
+                    );
+                    let userAuthVersion = Number(userData && userData.authVersion) || 0;
+                    if (!userData || tokenAuthVersion < userAuthVersion) {
+                        // unknown user or expired session
+                        try {
+                            /*
                                 // do not delete just in case there is something wrong with the check
                                 await db.redis
                                     .multi()
                                     .del('tn:token:' + tokenHash)
                                     .exec();
                                 */
-                            } catch (err) {
-                                // ignore
-                            }
-                            return fail();
+                        } catch (err) {
+                            // ignore
                         }
+                        return fail();
                     }
-
-                    return next();
                 }
+
+                // pass
+                return;
             }
         }
+    }
 
-        if (tokenRequired) {
-            // no valid token found
-            return fail();
-        }
+    if (tokenRequired) {
+        // no valid token found
+        return fail();
+    }
 
-        // allow all
-        req.role = 'root';
-        req.user = 'root';
-        next();
-    })
-);
+    // allow all
+    req.role = 'root';
+    req.user = 'root';
+});
 
 logger.token('user-ip', req => ((req.params && req.params.ip) || '').toString().substr(0, 40) || '-');
 logger.token('user-sess', req => (req.params && req.params.sess) || '-');
@@ -453,7 +471,7 @@ module.exports = done => {
                   emit: (key, message) => log.info('Gelf', JSON.stringify(message))
               };
 
-    loggelf = message => {
+    loggelf = (message, requiredKeys = []) => {
         if (typeof message === 'string') {
             message = {
                 short_message: message
@@ -470,7 +488,8 @@ module.exports = done => {
         message.timestamp = Date.now() / 1000;
         message._component = component;
         Object.keys(message).forEach(key => {
-            if (!message[key]) {
+            if (!message[key] && !requiredKeys.includes(key)) {
+                // remove the key if it empty/falsy/undefined/null and it is not required to stay
                 delete message[key];
             }
         });
@@ -524,7 +543,7 @@ module.exports = done => {
 
     settingsHandler = new SettingsHandler({ db: db.database });
 
-    server.loggelf = message => loggelf(message);
+    server.loggelf = (message, requiredKeys = []) => loggelf(message, requiredKeys);
 
     server.lock = new Lock({
         redis: db.redis,
@@ -553,14 +572,46 @@ module.exports = done => {
     certsRoutes(db, server);
     webhooksRoutes(db, server);
     settingsRoutes(db, server, settingsHandler);
+    healthRoutes(db, server, loggelf);
+
+    if (process.env.NODE_ENV === 'test') {
+        server.get(
+            { name: 'api-methods', path: '/api-methods' },
+            tools.responseWrapper(async (req, res) => {
+                res.charSet('utf-8');
+
+                return res.json(server.router.getRoutes());
+            })
+        );
+    }
+
+    if (process.env.GENERATE_API_DOCS === 'true') {
+        server.pre(restifyApiGenerate.restifyApiGenerate(server, restifyApiGenerateConfig));
+    }
+
+    if (process.env.REGENERATE_API_DOCS === 'true') {
+        // allow 2.5 seconds for services to start and the api doc to be generated, after that exit process
+        (async function () {
+            const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+            await sleep(2500);
+            process.exit(0);
+        })();
+    }
 
     server.on('error', err => {
         if (!started) {
             started = true;
             return done(err);
         }
-
         log.error('API', err);
+    });
+
+    server.on('restifyError', (req, res, err, callback) => {
+        if (!started) {
+            started = true;
+            return done(err);
+        }
+        return callback();
     });
 
     server.listen(config.api.port, config.api.host, () => {

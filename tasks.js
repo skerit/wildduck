@@ -7,6 +7,7 @@ const consts = require('./lib/consts');
 const RedFour = require('ioredfour');
 const yaml = require('js-yaml');
 const fs = require('fs');
+const { Queue } = require('bullmq');
 const MessageHandler = require('./lib/message-handler');
 const MailboxHandler = require('./lib/mailbox-handler');
 const CertHandler = require('./lib/cert-handler');
@@ -27,12 +28,14 @@ const taskAcme = require('./lib/tasks/acme');
 const taskAcmeUpdate = require('./lib/tasks/acme-update');
 const taskClearFolder = require('./lib/tasks/clear-folder');
 const taskSearchApply = require('./lib/tasks/search-apply');
+const taskUserIndexing = require('./lib/tasks/user-indexing');
 
 let messageHandler;
 let mailboxHandler;
 let auditHandler;
 let taskHandler;
 let certHandler;
+let backlogIndexingQueue;
 let gcTimeout;
 let taskTimeout;
 let gcLock;
@@ -121,8 +124,12 @@ module.exports.start = callback => {
         secret: config.certs && config.certs.secret,
         database: db.database,
         redis: db.redis,
+        users: db.users,
+        acmeConfig: config.acme,
         loggelf: message => loggelf(message)
     });
+
+    backlogIndexingQueue = new Queue('backlog_indexing', db.queueConf);
 
     let start = () => {
         // setup ready
@@ -206,7 +213,7 @@ module.exports.start = callback => {
         ensureCollections(() => {
             deleteIndexes(() => {
                 ensureIndexes(() => {
-                    // Do not release the indexing lock immediatelly
+                    // Do not release the indexing lock immediately
                     setTimeout(() => {
                         gcLock.releaseLock(lock, err => {
                             if (err) {
@@ -481,7 +488,7 @@ async function runTasks() {
             try {
                 await new Promise((resolve, reject) => {
                     // run pseudo task
-                    processTask({ type: 'acme-update', _id: 'acme-update-id', lock: 'acme-update-lock' }, {}, err => {
+                    processTask({ type: 'acme-update', _id: 'acme-update-id', lock: 'acme-update-lock', silent: true }, {}, err => {
                         if (err) {
                             return reject(err);
                         } else {
@@ -530,7 +537,9 @@ async function runTasks() {
 }
 
 function processTask(task, data, callback) {
-    log.verbose('Tasks', 'type=%s id=%s data=%s', task.type, task._id, JSON.stringify(data));
+    if (!data.silent) {
+        log.verbose('Tasks', 'type=%s id=%s data=%s', task.type, task._id, JSON.stringify(data));
+    }
 
     switch (task.type) {
         case 'restore':
@@ -664,6 +673,25 @@ function processTask(task, data, callback) {
                 task,
                 data,
                 {
+                    messageHandler,
+                    mailboxHandler,
+                    loggelf
+                },
+                err => {
+                    if (err) {
+                        return callback(err);
+                    }
+                    // release
+                    callback(null, true);
+                }
+            );
+
+        case 'user-indexing':
+            return taskUserIndexing(
+                task,
+                data,
+                {
+                    backlogIndexingQueue,
                     messageHandler,
                     mailboxHandler,
                     loggelf

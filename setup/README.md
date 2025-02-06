@@ -2,7 +2,7 @@
 
 Here you can find an example install script to install WildDuck with Haraka and ZoneMTA. The install script is self contained, you can upload to your server and start it as root. It fetches all required files from Github. After installation you should see exactly the same web interface as in https://webmail.wildduck.email/
 
-The install script should work with Ubuntu versions from 16.04 to 20.04 and the server must be blank. Blank meaning that there should be no existing software installed (eg. Apache, MySQL or Postfix). If the server already has something installed, then remove the extra applications before running this script. This also means that you should not run the install script in a VPS that you already use for other stuff.
+The install script should work with Ubuntu version from 22.04 (probably also with 20.04) and the server must be blank. Blank meaning that there should be no existing software installed (eg. Apache, MySQL or Postfix). If the server already has something installed, then remove the extra applications before running this script. This also means that you should not run the install script in a VPS that you already use for other stuff.
 
 ## What does it do?
 
@@ -31,10 +31,16 @@ All components use TLS/HTTPS with Let's Encrypt certificates by default. Webmail
 
 Run the following commands as root user. Before actually starting _install.sh_ you could inspect it to see what it exactly does.
 
-(run as `root`)
+> [!IMPORTANT]
+> Run the following commands as `root`
 
-    $ wget -O - https://raw.githubusercontent.com/nodemailer/wildduck/master/setup/get_install.sh | bash
-    $ ./install.sh mydomain.com mail.mydomain.com
+```bash
+wget -O - https://raw.githubusercontent.com/nodemailer/wildduck/master/setup/get_install.sh | bash
+```
+
+```bash
+./install.sh mydomain.com mail.mydomain.com
+```
 
 Where _mydomain.com_ is the email address domain and _mail.mydomain.com_ is the hostname of current server.
 
